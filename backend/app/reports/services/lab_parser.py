@@ -1,0 +1,314 @@
+"""Deterministic lab-value parser (Phase 1).
+
+Pure rule-based extraction + flagging. NO LLM calls. Given report text (and
+optionally the patient's gender/age), returns a list of lab results::
+
+    {name, canonical_name, value, unit, ref_low, ref_high, flag,
+     range_source, source_text, start, end}
+
+Rules:
+- The report's own printed reference range ALWAYS wins (``range_source``
+  ``"report"``) and the raw value is compared directly against it.
+- Otherwise the reference table is used with the patient's gender when a
+  sex-specific range exists (``range_source`` ``"table"``); when gender is
+  unknown (or no sex split exists and we fall back to the general adult
+  interval) ``range_source`` is ``"default_adult"``.
+- Reported values are converted to the test's standard unit before table
+  comparison. If the unit is missing, unknown, or not valid for that test,
+  the result is still returned but with ``flag`` ``"unknown"`` (never guess).
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Optional
+
+from app.reports.services.reference_ranges import (
+    REFERENCE_RANGES,
+    SYNONYM_TO_CANONICAL,
+    UNIT_ALIASES,
+    TEST_UNIT_FAMILIES,
+    MMOL_PER_TEST_FACTOR,
+    HBA1C_IFFC_ALIASES,
+    convert_hba1c_ifcc_to_percent,
+)
+
+# value like 11.2 / 11,200 / 0.9 — commas allowed as thousand separators.
+_VALUE_RE = r"(?P<value>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)"
+# printed range: (13.0 - 17.0), (13.0-17.0), (13.0 to 17.0) with en/em dashes.
+_RANGE_RE = re.compile(
+    r"\(\s*(?P<low>\d+(?:\.\d+)?)\s*(?:[-–—]|to)\s*(?P<high>\d+(?:\.\d+)?)\s*[^)]*\)"
+)
+# separator between test name and value: colon, dash, or whitespace.
+_SEP_RE = r"\s*[:\-–—]?\s*"
+
+# Build one alternation of ALL synonyms, longest first so that e.g.
+# "hdl cholesterol" wins over "cholesterol" on the same line.
+_SORTED_SYNONYMS = sorted(SYNONYM_TO_CANONICAL.keys(), key=len, reverse=True)
+_NAME_RE = re.compile(
+    r"(?P<name>" + r"|".join(re.escape(s) for s in _SORTED_SYNONYMS) + r")",
+    re.IGNORECASE,
+)
+
+# Sorted unit aliases for longest-prefix matching (normalised form).
+_SORTED_UNIT_ALIASES = sorted(UNIT_ALIASES.keys(), key=len, reverse=True)
+
+# Raw-count divisor per test for "count_raw" family (plain cell counts).
+_COUNT_RAW_DIVISOR = {"wbc": 1_000.0, "platelets": 1_000.0, "rbc": 1_000_000.0}
+
+# Heuristic: a "count_raw" value below this is already in standard units
+# (e.g. "WBC 7.5 /uL" written loosely); at/above it we treat it as a raw
+# count and divide. Values are never exactly in this grey zone in practice.
+_COUNT_RAW_THRESHOLD = 100.0
+
+
+def normalize_unit(raw: str) -> str:
+    """Lowercase, remove spaces/dots, unify micro signs."""
+    u = raw.strip().lower().replace(" ", "").replace(".", "")
+    u = u.replace("µ", "u").replace("μ", "u").replace("³", "3")
+    return u
+
+
+def lookup_unit(canonical: str, raw_unit: str) -> Optional[tuple[str, float]]:
+    """Resolve ``raw_unit`` for ``canonical`` -> (family, factor) or None.
+
+    Returns None when the unit is unknown or not valid for this test.
+    """
+    norm = normalize_unit(raw_unit)
+    if not norm:
+        return None
+    # HbA1c IFCC special case (affine conversion handled by caller).
+    if canonical == "hba1c" and norm in HBA1C_IFFC_ALIASES:
+        return ("hba1c_ifcc", 0.0)
+    hit = UNIT_ALIASES.get(norm)
+    if hit is None:
+        # Tolerate a trailing '.' or plural 's' OCR artefact.
+        hit = UNIT_ALIASES.get(norm.rstrip(".")) or UNIT_ALIASES.get(norm.rstrip("s"))
+    if hit is None:
+        return None
+    family, factor = hit
+    if family not in TEST_UNIT_FAMILIES.get(canonical, set()):
+        return None
+    if family == "mmol":
+        factor = MMOL_PER_TEST_FACTOR.get(canonical)
+        if factor is None:
+            return None
+    return (family, factor)
+
+
+def _convert_to_standard(canonical: str, value: float, family: str, factor: float) -> float:
+    if family == "count_raw":
+        divisor = _COUNT_RAW_DIVISOR.get(canonical, 1.0)
+        if value >= _COUNT_RAW_THRESHOLD:
+            return value / divisor
+        return value
+    return value * factor
+
+
+def _table_range(canonical: str, gender: Optional[str]) -> tuple[float, float, str]:
+    ranges = REFERENCE_RANGES[canonical]["ranges"]
+    g = (gender or "").strip().lower()
+    if g in ("male", "female") and g in ranges:
+        low, high = ranges[g]
+        return low, high, "table"
+    low, high = ranges["adult"]
+    # "table" only when the table itself has no sex split (the adult interval
+    # IS the table entry); otherwise we fell back -> "default_adult".
+    if "male" in ranges or "female" in ranges:
+        return low, high, "default_adult"
+    return low, high, "table"
+
+
+def _flag(value: float, low: float, high: float) -> str:
+    if value < low:
+        return "low"
+    if value > high:
+        return "high"
+    return "normal"
+
+
+def _extract_unit_text(after_value: str) -> str:
+    """Take up to 3 whitespace-separated tokens as the unit candidate."""
+    tokens = after_value.strip().split()
+    if not tokens:
+        return ""
+    # Stop at anything that starts a new clause (e.g. "is", "was", "and").
+    stop_words = {"is", "was", "are", "and", "with", "of", "at"}
+    picked: list[str] = []
+    for tok in tokens[:3]:
+        if tok.lower().strip(",.;") in stop_words:
+            break
+        # A bare number here means the "unit" capture ran into another value.
+        if re.fullmatch(r"\d+(?:\.\d+)?", tok.strip(",.;")):
+            break
+        picked.append(tok)
+        # Units rarely exceed 2 tokens; a token ending in ',' or containing
+        # '/' usually terminates the unit ("mg/dL," / "x10^3/uL").
+        if "/" in tok or tok.endswith(","):
+            break
+    unit = " ".join(picked).strip(" ,;")
+    return unit
+
+
+def parse_lab_results(
+    text: str,
+    gender: Optional[str] = None,
+    age_years: Optional[float] = None,
+) -> list[dict]:
+    """Parse lab values from report text. Deterministic; no LLM calls.
+
+    ``age_years`` is accepted for forward compatibility (reference table is
+    adult-only; documented in reference_ranges.py) and currently unused.
+    """
+    _ = age_years  # reserved for future paediatric tables
+    if not text or not text.strip():
+        return []
+
+    results: list[dict] = []
+    offset = 0
+    for line in text.splitlines():
+        line_len = len(line)
+        stripped = line.strip()
+        if not stripped:
+            offset += line_len + 1
+            continue
+
+        # Printed ranges on this line (usually one). Map each to caller later;
+        # with a single test per line the first range belongs to the match.
+        range_match = _RANGE_RE.search(stripped)
+        printed = None
+        if range_match:
+            try:
+                printed = (float(range_match.group("low")), float(range_match.group("high")))
+            except ValueError:
+                printed = None
+
+        # Remove parenthetical groups so range text can't be parsed as values.
+        clean = _RANGE_RE.sub(" ", stripped)
+        # Hyphenated names ("LDL-Cholesterol") -> spaced so multi-word
+        # synonyms match; digit-hyphen cases ("25-OH") are left alone.
+        clean = re.sub(r"(?<=[A-Za-z])-(?=[A-Za-z])", " ", clean)
+
+        for name_match in _NAME_RE.finditer(clean):
+            synonym = name_match.group("name")
+            canonical = SYNONYM_TO_CANONICAL[synonym.lower()]
+            # Avoid double-counting the same test on one line (e.g. "HbA1c ...
+            # glycosylated hemoglobin ..." would match twice).
+            if any(r["canonical_name"] == canonical and r["_line"] == offset for r in results):
+                continue
+            rest = clean[name_match.end():]
+            sep = re.match(_SEP_RE, rest)
+            rest_after_sep = rest[sep.end():] if sep else rest
+            val_match = re.match(_VALUE_RE, rest_after_sep)
+            if not val_match:
+                continue
+            try:
+                value = float(val_match.group("value").replace(",", ""))
+            except ValueError:
+                continue
+            after_value = rest_after_sep[val_match.end():]
+            unit_raw = _extract_unit_text(after_value)
+            display_name = REFERENCE_RANGES[canonical]["display_name"]
+
+            # Absolute offsets into the original full text.
+            try:
+                name_pos = stripped.lower().index(synonym.lower())
+            except ValueError:
+                name_pos = 0
+            line_content_start = offset + (len(line) - len(line.lstrip()))
+            start = line_content_start + name_pos
+            end = line_content_start + len(stripped)
+
+            if printed is not None:
+                ref_low, ref_high = printed
+                results.append({
+                    "name": display_name,
+                    "canonical_name": canonical,
+                    "value": value,
+                    "unit": unit_raw,
+                    "ref_low": ref_low,
+                    "ref_high": ref_high,
+                    "flag": _flag(value, ref_low, ref_high),
+                    "range_source": "report",
+                    "source_text": stripped,
+                    "start": start,
+                    "end": end,
+                    "_line": offset,
+                })
+                continue
+
+            table_low, table_high, source = _table_range(canonical, gender)
+            if not unit_raw:
+                # Missing unit and no printed range: show table range but do
+                # not flag (unit cannot be verified).
+                results.append({
+                    "name": display_name,
+                    "canonical_name": canonical,
+                    "value": value,
+                    "unit": "",
+                    "ref_low": table_low,
+                    "ref_high": table_high,
+                    "flag": "unknown",
+                    "range_source": source,
+                    "source_text": stripped,
+                    "start": start,
+                    "end": end,
+                    "_line": offset,
+                })
+                continue
+
+            resolved = lookup_unit(canonical, unit_raw)
+            if resolved is None:
+                results.append({
+                    "name": display_name,
+                    "canonical_name": canonical,
+                    "value": value,
+                    "unit": unit_raw,
+                    "ref_low": table_low,
+                    "ref_high": table_high,
+                    "flag": "unknown",
+                    "range_source": source,
+                    "source_text": stripped,
+                    "start": start,
+                    "end": end,
+                    "_line": offset,
+                })
+                continue
+
+            family, factor = resolved
+            if family == "hba1c_ifcc":
+                std_value = convert_hba1c_ifcc_to_percent(value)
+                std_unit = "%"
+            else:
+                std_value = _convert_to_standard(canonical, value, family, factor)
+                std_unit = REFERENCE_RANGES[canonical]["standard_unit"]
+            results.append({
+                "name": display_name,
+                "canonical_name": canonical,
+                "value": round(std_value, 3),
+                "unit": std_unit,
+                "ref_low": table_low,
+                "ref_high": table_high,
+                "flag": _flag(std_value, table_low, table_high),
+                "range_source": source,
+                "source_text": stripped,
+                "start": start,
+                "end": end,
+                "_line": offset,
+            })
+
+        offset += line_len + 1
+
+    for r in results:
+        r.pop("_line", None)
+    # Deterministic order: by position in text.
+    results.sort(key=lambda r: (r["start"], r["canonical_name"]))
+    return results
+
+
+def canonicalize_test_name(name: str) -> Optional[str]:
+    """Map a user-supplied test name/synonym to its canonical key."""
+    key = (name or "").strip().lower()
+    if key in REFERENCE_RANGES:
+        return key
+    return SYNONYM_TO_CANONICAL.get(key)

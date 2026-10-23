@@ -1,0 +1,15 @@
+# AI pipeline dependencies (optional)
+# These packages may require specific Python versions or system dependencies
+# Install only if your environment supports them
+
+# Primary OCR engine
+paddleocr==3.7.0
+paddlepaddle==3.3.1
+
+# Fallback OCR engine (used if PaddleOCR is unavailable)
+easyocr==1.7.2
+torch>=2.0.0
+
+# Medical NLP
+spacy>=3.8.0
+scispacy>=0.5.4

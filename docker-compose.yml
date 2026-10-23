@@ -1,0 +1,57 @@
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  backend:
+    build:
+      context: ./backend
+      args:
+        # Set INSTALL_AI=true to include paddleocr/easyocr/torch/spacy.
+        INSTALL_AI: "${INSTALL_AI:-false}"
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      MONGODB_URL: mongodb://mongo:27017
+      MONGODB_DB_NAME: ${MONGODB_DB_NAME:-healthcare_system}
+      SECRET_KEY: ${SECRET_KEY:-change_me_in_production_use_a_strong_secret_key}
+      FRONTEND_URL: http://localhost:8080
+      OMNIROUTE_API_KEY: ${OMNIROUTE_API_KEY:-}
+      OMNIROUTE_BASE_URL: ${OMNIROUTE_BASE_URL:-https://api.omni-route.com/v1}
+      OMNIROUTE_MODEL: ${OMNIROUTE_MODEL:-qwen2.5-7b-instruct}
+      CORS_ORIGINS: http://localhost:8080
+      # Seed the first admin on first boot (see backend/scripts/seed_admin.py).
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    volumes:
+      - uploads_data:/app/uploads
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+
+volumes:
+  mongo_data:
+  uploads_data:
