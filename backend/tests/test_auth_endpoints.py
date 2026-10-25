@@ -145,7 +145,7 @@ class TestAuth:
             mock_user_instance.get_by_email.return_value = mock_user
             mock_user_repo.return_value = mock_user_instance
 
-            response = client.post("/api/v1/auth/login", data={"username": "doctor@test.com", "password": "password123"})
+            response = client.post("/api/v1/auth/login", data={"username": "doctor@test.com", "password": "password123", "portal": "doctor"})
             assert response.status_code == 200
             data = response.json()
             assert "access_token" in data
@@ -157,7 +157,7 @@ class TestAuth:
             mock_user_instance.get_by_email.return_value = None
             mock_user_repo.return_value = mock_user_instance
 
-            response = client.post("/api/v1/auth/login", data={"username": "nobody@test.com", "password": "wrong"})
+            response = client.post("/api/v1/auth/login", data={"username": "nobody@test.com", "password": "wrong", "portal": "patient"})
             assert response.status_code == 401
 
     def test_login_inactive_user(self):
@@ -171,7 +171,57 @@ class TestAuth:
             mock_user_instance.get_by_email.return_value = mock_user
             mock_user_repo.return_value = mock_user_instance
 
-            response = client.post("/api/v1/auth/login", data={"username": "inactive@test.com", "password": "password123"})
+            response = client.post("/api/v1/auth/login", data={"username": "inactive@test.com", "password": "password123", "portal": "patient"})
+            assert response.status_code == 403
+
+    def test_login_patient_credentials_on_doctor_portal_rejected(self):
+        with patch("app.auth.router.UserRepository") as mock_user_repo:
+            from app.core.security import get_password_hash
+            mock_user = _create_mock_user("user-123", "patient@test.com", "patient", "Test Patient")
+            mock_user.hashed_password = get_password_hash("password123")
+
+            mock_user_instance = AsyncMock()
+            mock_user_instance.get_by_email.return_value = mock_user
+            mock_user_repo.return_value = mock_user_instance
+
+            response = client.post(
+                "/api/v1/auth/login",
+                data={"username": "patient@test.com", "password": "password123", "portal": "doctor"},
+            )
+            assert response.status_code == 403
+            assert "portal" in response.json()["detail"].lower()
+
+    def test_login_doctor_credentials_on_patient_portal_rejected(self):
+        with patch("app.auth.router.UserRepository") as mock_user_repo:
+            from app.core.security import get_password_hash
+            mock_user = _create_mock_user("user-123", "doctor@test.com", "doctor", "Dr. Test")
+            mock_user.hashed_password = get_password_hash("password123")
+
+            mock_user_instance = AsyncMock()
+            mock_user_instance.get_by_email.return_value = mock_user
+            mock_user_repo.return_value = mock_user_instance
+
+            response = client.post(
+                "/api/v1/auth/login",
+                data={"username": "doctor@test.com", "password": "password123", "portal": "patient"},
+            )
+            assert response.status_code == 403
+            assert "portal" in response.json()["detail"].lower()
+
+    def test_login_admin_credentials_on_patient_portal_rejected(self):
+        with patch("app.auth.router.UserRepository") as mock_user_repo:
+            from app.core.security import get_password_hash
+            mock_user = _create_mock_user("user-123", "admin@test.com", "admin", "Admin")
+            mock_user.hashed_password = get_password_hash("password123")
+
+            mock_user_instance = AsyncMock()
+            mock_user_instance.get_by_email.return_value = mock_user
+            mock_user_repo.return_value = mock_user_instance
+
+            response = client.post(
+                "/api/v1/auth/login",
+                data={"username": "admin@test.com", "password": "password123", "portal": "patient"},
+            )
             assert response.status_code == 403
 
     def test_auth_me_without_token(self):

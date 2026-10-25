@@ -4,7 +4,7 @@ import { getPatientHistory, getDoctorPatientHistory } from '../services/history'
 import { listPatients } from '../services/patients'
 import { deleteReport } from '../services/reports'
 import ConfirmDialog from '../components/ConfirmDialog.jsx'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   Clock,
   FileText,
@@ -24,15 +24,22 @@ import {
 export default function History() {
   const { user } = useAuth()
   const isDoctor = user?.role === 'doctor'
+  const [searchParams] = useSearchParams()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [events, setEvents] = useState([])
   const [order, setOrder] = useState('desc')
   const [patients, setPatients] = useState([])
-  const [selectedPatientId, setSelectedPatientId] = useState('')
+  const [selectedPatientId, setSelectedPatientId] = useState(searchParams.get('patient') || '')
   const [loadingPatients, setLoadingPatients] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [deletingId, setDeletingId] = useState(null)
+
+  const incomingPatientId = searchParams.get('patient') || ''
+
+  useEffect(() => {
+    if (incomingPatientId) setSelectedPatientId(incomingPatientId)
+  }, [incomingPatientId])
 
   const handleConfirmDelete = async () => {
     if (!confirmDelete || deletingId) return
@@ -259,7 +266,7 @@ export default function History() {
             <h4 style={{ margin: '8px 0 4px', color: 'var(--slate-900)' }}>No medical records available yet</h4>
             <p style={{ margin: 0, fontSize: '0.88rem' }}>Uploaded reports and digital prescriptions will appear here.</p>
             {!isDoctor && (
-              <Link to="/reports" className="btn btn-primary btn-sm" style={{ marginTop: 14 }}>
+              <Link to="/patient/reports" className="btn btn-primary btn-sm" style={{ marginTop: 14 }}>
                 <span>Upload your first report</span>
                 <ChevronRight size={14} />
               </Link>
@@ -301,12 +308,12 @@ export default function History() {
                         </div>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
                           {isReport ? (
-                            <Link to={`/reports/${event.source_id}`} className="btn btn-secondary btn-sm">
+                            <Link to={`${isDoctor ? '/doctor' : '/patient'}/reports/${event.source_id}`} className="btn btn-secondary btn-sm">
                               <span>View Report</span>
                               <ArrowUpRight size={14} />
                             </Link>
                           ) : (
-                            <Link to="/prescriptions" className="btn btn-secondary btn-sm">
+                            <Link to={isDoctor ? '/doctor/prescriptions' : '/patient/prescriptions'} className="btn btn-secondary btn-sm">
                               <span>View Prescription</span>
                               <ArrowUpRight size={14} />
                             </Link>

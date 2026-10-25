@@ -10,6 +10,7 @@ class RegisterRequest(BaseModel):
     role: Literal["patient", "doctor"]
     full_name: str = Field(..., min_length=2, max_length=100)
     license_number: Optional[str] = Field(default=None, max_length=100)
+    portal: Optional[Literal["patient", "doctor"]] = None
 
     @field_validator("password")
     @classmethod
@@ -23,6 +24,23 @@ class RegisterRequest(BaseModel):
         if not re.search(r"\d", v):
             raise ValueError("Password must contain at least one digit")
         return v
+
+    @field_validator("portal")
+    @classmethod
+    def validate_portal_matches_role(cls, v: Optional[str], info) -> Optional[str]:
+        if v is not None and info.data.get("role") != v:
+            raise ValueError("Portal must match role")
+        return v
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+    portal: Literal["patient", "doctor", "admin"]
+    grant_type: Optional[str] = "password"
+    scope: Optional[str] = ""
+    client_id: Optional[str] = None
+    client_secret: Optional[str] = None
 
 
 class Token(BaseModel):

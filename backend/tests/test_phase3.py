@@ -316,7 +316,20 @@ class TestEnforcementNegatives:
     def test_prescription_create_403(self):
         self._doctor()
         try:
-            with self._deny():
+            with self._deny(), patch("app.prescriptions.router.PatientRepository.get_by_patient_id", new_callable=AsyncMock) as mock_get_patient:
+                from unittest.mock import MagicMock
+                from datetime import datetime, timezone
+                mock_patient = MagicMock()
+                mock_patient.patient_code = "PAT-ABC12"
+                mock_patient.allow_prescriptions = False  # Patient has disabled prescriptions
+                mock_patient.emergency_token = None
+                mock_patient.id = "p1"
+                mock_patient.user_id = "p1"
+                mock_patient.patient_id = "p1"
+                mock_patient.created_at = datetime.now(timezone.utc)
+                mock_patient.updated_at = datetime.now(timezone.utc)
+                mock_get_patient.return_value = mock_patient
+                
                 r = client.post("/api/v1/prescriptions",
                                 json={"patient_id": "p1", "items": [
                                     {"medicine_name": "A", "dosage": "1", "frequency": "OD", "duration": "3 days"}]},

@@ -9,6 +9,7 @@ from app.auth.dependencies import (
 from app.access import grants as grant_checks
 from app.audit.service import log_access, client_info
 from app.schemas.patient import PatientCreate, PatientUpdate, PatientResponse
+from app.models.patient import PatientSearchResult
 from app.database.repositories.patient_repository import PatientRepository
 from app.models.user import User
 
@@ -41,6 +42,36 @@ async def update_my_profile(patient_in: PatientUpdate, current_user: User = Depe
 @router.post("/", response_model=PatientResponse, status_code=status.HTTP_201_CREATED)
 async def create_patient(patient_in: PatientCreate, current_user: User = Depends(get_current_verified_doctor)):
     raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Not yet implemented")
+
+
+@router.get("/search", response_model=List[PatientSearchResult])
+async def search_patients(
+    q: str = Query(..., min_length=1, max_length=100, description="Search by name, email, or patient code"),
+    limit: int = Query(20, ge=1, le=50),
+    current_user: User = Depends(get_current_verified_doctor),
+):
+    """Doctor searches for a patient by name, email, or patient_code.
+    Returns minimal fields: id, full_name, patient_code, age."""
+    repo = PatientRepository()
+    patients = await repo.search_patients(q, limit=limit)
+    
+    results = []
+    for p in patients:
+        age = None
+        if p.date_of_birth:
+            from datetime import datetime
+            today = datetime.now()
+            age = today.year - p.date_of_birth.year - (
+                (today.month, today.day) < (p.date_of_birth.month, p.date_of_birth.day)
+            )
+        results.append(PatientSearchResult(
+            id=p.id,
+            patient_id=p.patient_id or p.user_id or p.id,
+            full_name=p.full_name,
+            patient_code=p.patient_code or "",
+            age=age,
+        ))
+    return results
 
 
 @router.get("/me/emergency-card")

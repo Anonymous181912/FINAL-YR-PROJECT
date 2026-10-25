@@ -106,6 +106,34 @@ class PrescriptionService:
         prescription = await self.repo.create_prescription(**data)
         return prescription
 
+    async def _patient_identifiers(self, user_id: str) -> set[str]:
+        """All ids that can own a patient's prescriptions.
+
+        New prescriptions store the canonical patient id (``patient_id or
+        user_id or id``). Older rows may still carry the user id or the
+        profile document id, so every endpoint accepts any of them.
+        """
+        ids = {user_id} if user_id else set()
+        try:
+            patient = await self.patient_repo.get_by_user_id(user_id)
+        except Exception:
+            patient = None
+        if patient is not None:
+            canonical = (
+                getattr(patient, "patient_id", None)
+                or getattr(patient, "user_id", None)
+                or getattr(patient, "id", None)
+            )
+            for value in (
+                canonical,
+                getattr(patient, "patient_id", None),
+                getattr(patient, "user_id", None),
+                getattr(patient, "id", None),
+            ):
+                if isinstance(value, str) and value:
+                    ids.add(value)
+        return ids
+
     async def get_prescription(self, prescription_id: str, requester_id: str, requester_role: str) -> Optional[PrescriptionInDB]:
         prescription = await self.repo.get_by_id(prescription_id)
         if not prescription:
@@ -113,8 +141,10 @@ class PrescriptionService:
 
         if requester_role == "doctor" and prescription.doctor_id != requester_id:
             return None
-        if requester_role == "patient" and prescription.patient_id != requester_id:
-            return None
+        if requester_role == "patient":
+            identifiers = await self._patient_identifiers(requester_id)
+            if prescription.patient_id not in identifiers:
+                return None
 
         return prescription
 
@@ -216,7 +246,11 @@ class PrescriptionService:
         return await self.repo.list_by_doctor(doctor_id, skip=skip, limit=limit)
 
     async def list_patient_prescriptions(self, patient_id: str, skip: int = 0, limit: int = 20) -> list[PrescriptionInDB]:
-        return await self.repo.list_by_patient(patient_id, skip=skip, limit=limit)
+        # Patients only see issued prescriptions (not drafts)
+        identifiers = await self._patient_identifiers(patient_id)
+        return await self.repo.list_by_patient_ids(
+            sorted(identifiers), skip=skip, limit=limit, status="issued"
+        )
 
     async def generate_pdf(self, prescription: PrescriptionInDB) -> str:
         patient = await self.patient_repo.get_by_patient_id(prescription.patient_id)

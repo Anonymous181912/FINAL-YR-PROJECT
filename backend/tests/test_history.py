@@ -281,3 +281,26 @@ class TestPatientHistory:
                 assert response.status_code == 404
         finally:
             app.dependency_overrides.pop(get_current_user, None)
+
+
+class TestHistoryConsentGate:
+    def test_doctor_without_grant_is_blocked(self):
+        from fastapi import HTTPException
+
+        async def _deny(*args, **kwargs):
+            raise HTTPException(status_code=404, detail="Access denied")
+
+        app.dependency_overrides[get_current_user] = _override_doctor_user
+        try:
+            with patch(
+                "app.history.router.grant_checks.require_active_grant",
+                new=_deny,
+            ):
+                token = _create_doctor_token()
+                response = client.get(
+                    "/api/v1/history/patient/patient-1",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                assert response.status_code == 404
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import AccessPrivacy from './pages/AccessPrivacy.jsx'
 import * as accessApi from './services/access'
+import * as patientsApi from './services/patients'
 
 vi.mock('./services/access', () => ({
   incomingRequests: vi.fn(),
@@ -10,6 +11,11 @@ vi.mock('./services/access', () => ({
   myGrants: vi.fn(),
   revokeGrant: vi.fn(),
   myAuditTrail: vi.fn(),
+}))
+
+vi.mock('./services/patients', () => ({
+  getMyPatientProfile: vi.fn(),
+  updateMyPatientProfile: vi.fn(),
 }))
 
 const PENDING = [
@@ -30,6 +36,10 @@ describe('Access & Privacy flow', () => {
     accessApi.myGrants.mockResolvedValue(GRANTS)
     accessApi.myAuditTrail.mockResolvedValue(AUDIT)
     accessApi.approveRequest.mockResolvedValue({ id: 'g2', status: 'active' })
+    patientsApi.getMyPatientProfile.mockResolvedValue({ allow_prescriptions: true })
+    patientsApi.updateMyPatientProfile.mockImplementation((payload) =>
+      Promise.resolve({ allow_prescriptions: true, ...payload })
+    )
   })
 
   it('lists pending requests, grants and the audit trail', async () => {
@@ -45,5 +55,15 @@ describe('Access & Privacy flow', () => {
     await waitFor(() => expect(screen.getByText(/Pending Requests \(1\)/)).toBeInTheDocument())
     fireEvent.click(screen.getByText('Approve'))
     await waitFor(() => expect(accessApi.approveRequest).toHaveBeenCalledWith('req1', 30))
+  })
+
+  it('toggles the prescription writing permission', async () => {
+    render(<AccessPrivacy />)
+    await waitFor(() => expect(screen.getByText('Disable prescription writing')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('Disable prescription writing'))
+    await waitFor(() =>
+      expect(patientsApi.updateMyPatientProfile).toHaveBeenCalledWith({ allow_prescriptions: false })
+    )
+    await waitFor(() => expect(screen.getByText(/Prescription writing disabled/)).toBeInTheDocument())
   })
 })

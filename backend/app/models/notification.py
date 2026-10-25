@@ -7,7 +7,7 @@ from typing import Optional
 
 class NotificationBase(BaseModel):
     user_id: str
-    kind: str = Field(..., pattern=r"^(follow_up|medication_end|general)$")
+    kind: str = Field(..., pattern=r"^(follow_up|medication_end|general|prescription_issued)$")
     title: str = Field(..., min_length=1, max_length=200)
     body: str = Field(default="", max_length=2000)
     link: Optional[str] = None

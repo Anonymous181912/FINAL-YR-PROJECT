@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional
-from app.models.patient import Patient
+from app.models.patient import Patient, PatientSearchResult
 
 
 class PatientCreate(BaseModel):
@@ -15,6 +15,7 @@ class PatientCreate(BaseModel):
     emergency_contact_phone: Optional[str] = None
     blood_group: Optional[str] = None
     allergies: list[str] = []
+    allow_prescriptions: bool = True
 
 
 class PatientUpdate(BaseModel):
@@ -29,6 +30,7 @@ class PatientUpdate(BaseModel):
     blood_group: Optional[str] = None
     allergies: Optional[list[str]] = None
     is_active: Optional[bool] = None
+    allow_prescriptions: Optional[bool] = None
 
 
 class PatientResponse(BaseModel):
@@ -46,6 +48,8 @@ class PatientResponse(BaseModel):
     blood_group: Optional[str] = None
     allergies: list[str] = []
     is_active: bool = True
+    patient_code: str = ""
+    allow_prescriptions: bool = True
     created_at: datetime
     updated_at: datetime
 

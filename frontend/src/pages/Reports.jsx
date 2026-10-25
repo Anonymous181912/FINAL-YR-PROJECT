@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth.jsx'
 import { uploadReport, interpretReport, listReports, getReport, deleteReport, getLabTrends, LAB_TESTS, chatWithReport } from '../services/reports.js'
 import { listPatients } from '../services/patients.js'
@@ -358,6 +358,7 @@ export function ChatPanel({ reportId }) {
 export default function Reports() {
   const { id: paramId } = useParams()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const { user } = useAuth()
 
   const [file, setFile] = useState(null)
@@ -384,6 +385,13 @@ export default function Reports() {
   const fileInputRef = useRef(null)
 
   const isDoctor = user?.role === 'doctor'
+
+  useEffect(() => {
+    if (!isDoctor && searchParams.get('upload') === '1') {
+      const target = document.getElementById('upload-report')
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }, [isDoctor, searchParams])
 
   const fetchReports = async (patientId = selectedPatientId) => {
     setLoadingReports(true)
@@ -1017,7 +1025,7 @@ export default function Reports() {
 
       {/* Upload Box Card (patients only) */}
       {!isDoctor && (
-      <div className="card">
+      <div className="card" id="upload-report">
         <div className="card-header">
           <h3>
             <UploadCloud size={20} color="var(--primary-600)" />

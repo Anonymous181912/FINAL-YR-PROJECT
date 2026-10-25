@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth.jsx'
 import api from '../services/api'
 import { downloadEmergencyCard, rotateEmergencyToken, revokeEmergencyToken } from '../services/notifications'
@@ -16,6 +17,7 @@ import {
 
 export default function Profile({ verificationStatus }) {
   const { user } = useAuth()
+  const [searchParams] = useSearchParams()
   const isDoctor = user?.role === 'doctor'
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -49,6 +51,8 @@ export default function Profile({ verificationStatus }) {
 
   const rows = []
   if (profile) {
+    if (!isDoctor && profile.patient_code) rows.push(['Patient Code', profile.patient_code])
+    if (!isDoctor) rows.push(['Prescription Writing', profile.allow_prescriptions === false ? 'Disabled' : 'Enabled'])
     if (profile.specialization) rows.push(['Specialization', profile.specialization])
     if (profile.license_number) rows.push(['License Number', profile.license_number])
     if (profile.verification_status) rows.push(['Verification', profile.verification_status])
@@ -143,7 +147,7 @@ export default function Profile({ verificationStatus }) {
             </div>
 
             {!isDoctor && !loading && (
-              <div className="card" style={{ marginTop: 20, marginBottom: 0, border: '1px solid #fecaca' }}>
+              <div className="card" id="emergency-card" style={{ marginTop: 20, marginBottom: 0, border: '1px solid #fecaca' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                   <HeartPulse size={18} color="#b91c1c" />
                   <h3 style={{ margin: 0, fontSize: '1rem' }}>Emergency Card</h3>

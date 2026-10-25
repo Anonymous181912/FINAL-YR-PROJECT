@@ -1,24 +1,45 @@
 import { useState, useEffect } from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate, Link } from 'react-router-dom'
 import { AuthProvider, useAuth } from './auth.jsx'
-import Login from './pages/Login.jsx'
-import Dashboard from './pages/Dashboard.jsx'
-import Reports from './pages/Reports.jsx'
-import Prescriptions from './pages/Prescriptions.jsx'
-import Patients from './pages/Patients.jsx'
-import History from './pages/History.jsx'
-import Profile from './pages/Profile.jsx'
+import Landing from './pages/Landing.jsx'
+import PatientLogin from './pages/PatientLogin.jsx'
+import DoctorLogin from './pages/DoctorLogin.jsx'
+import AdminLogin from './pages/AdminLogin.jsx'
+import PatientDashboard from './pages/PatientDashboard.jsx'
+import DoctorDashboard from './pages/DoctorDashboard.jsx'
+import PatientReports from './pages/PatientReports.jsx'
+import DoctorReports from './pages/DoctorReports.jsx'
+import PatientPrescriptions from './pages/PatientPrescriptions.jsx'
+import DoctorPrescriptions from './pages/DoctorPrescriptions.jsx'
+import PatientHistory from './pages/PatientHistory.jsx'
+import DoctorPatients from './pages/DoctorPatients.jsx'
+import PatientProfile from './pages/PatientProfile.jsx'
+import DoctorProfile from './pages/DoctorProfile.jsx'
+import DoctorAccess from './pages/DoctorAccess.jsx'
+import DoctorHistory from './pages/DoctorHistory.jsx'
+import PatientAccess from './pages/PatientAccess.jsx'
 import Admin from './pages/Admin.jsx'
 import { VerifyPrescription, VerifyEmergency } from './pages/Verify.jsx'
-import AccessPrivacy from './pages/AccessPrivacy.jsx'
 import { ForgotPassword, ResetPassword } from './pages/PasswordReset.jsx'
-import Layout from './Layout.jsx'
+import PatientLayout from './layouts/PatientLayout.jsx'
+import DoctorLayout from './layouts/DoctorLayout.jsx'
+import AdminLayout from './layouts/AdminLayout.jsx'
 import api from './services/api'
 
-function ProtectedRoute({ children, allowedRoles }) {
+export function ProtectedRoute({ children, allowedRoles, portal }) {
   const { user } = useAuth()
-  if (!user) return <Navigate to="/login" replace />
-  if (allowedRoles && !allowedRoles.includes(user.role)) return <Navigate to="/dashboard" replace />
+  if (!user) {
+    const loginPath = portal === 'doctor' ? '/doctor/login' : portal === 'admin' ? '/admin/login' : '/patient/login'
+    return <Navigate to={loginPath} replace />
+  }
+  if (allowedRoles && !allowedRoles.includes(user.role)) {
+    const dashboardPath = user.role === 'doctor' ? '/doctor/dashboard' : user.role === 'admin' ? '/admin/dashboard' : '/patient/dashboard'
+    return <Navigate to={dashboardPath} replace />
+  }
+  if (portal && user.role !== portal && user.role !== 'admin') {
+    const dashboardPath = user.role === 'doctor' ? '/doctor/dashboard' : '/patient/dashboard'
+    return <Navigate to={dashboardPath} replace />
+  }
   return children
 }
 
@@ -55,8 +76,8 @@ function PendingApproval() {
           You can still view your profile. Please check back later.
         </p>
         <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
-          <Link to="/profile" className="btn btn-secondary">View Profile</Link>
-          <button className="btn btn-ghost" onClick={() => { logout(); window.location.href = '/login' }}>Sign Out</button>
+          <Link to="/doctor/profile" className="btn btn-secondary">View Profile</Link>
+          <button className="btn btn-ghost" onClick={() => { logout(); window.location.href = '/doctor/login' }}>Sign Out</button>
         </div>
       </div>
     </div>
@@ -87,8 +108,6 @@ function AppRoutes() {
   const { user, authLoading } = useAuth()
   const [verifyState, setVerifyState] = useState({ loading: false, status: null })
 
-  // Nothing redirects until auth initialization completes: unauthenticated
-  // users always land on Login, never on a dashboard or blank page.
   useEffect(() => {
     let cancelled = false
     async function checkDoctor() {
@@ -110,8 +129,6 @@ function AppRoutes() {
 
   if (authLoading || (user?.role === 'doctor' && verifyState.loading)) return <LoadingSplash />
 
-  // Unverified doctors see the pending-approval screen for every route
-  // except profile (so they can confirm their details) and login.
   const isPendingDoctor = user?.role === 'doctor' && verifyState.status && verifyState.status !== 'approved'
 
   return (
@@ -121,80 +138,90 @@ function AppRoutes() {
       <Route path="/emergency/:token" element={<VerifyEmergency />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/reset-password" element={<ResetPassword />} />
-      <Route
-        path="/login"
-        element={user ? <Navigate to="/dashboard" replace /> : <Login />}
-      />
+      
+      {/* Landing Page */}
+      <Route path="/" element={<Landing />} />
+      
+      {/* Patient Portal Routes */}
+      <Route path="/patient/login" element={user?.role === 'patient' ? <Navigate to="/patient/dashboard" replace /> : <PatientLogin />} />
+      <Route path="/patient/register" element={user?.role === 'patient' ? <Navigate to="/patient/dashboard" replace /> : <PatientLogin mode="register" />} />
+      <Route path="/patient" element={
+        <ProtectedRoute allowedRoles={['patient']} portal="patient">
+          <PatientLayout />
+        </ProtectedRoute>
+      }>
+        <Route path="dashboard" element={<PatientDashboard />} />
+        <Route path="reports" element={<PatientReports />} />
+        <Route path="reports/:id" element={<PatientReports />} />
+        <Route path="prescriptions" element={<PatientPrescriptions />} />
+        <Route path="history" element={<PatientHistory />} />
+        <Route path="profile" element={<PatientProfile />} />
+        <Route path="access" element={<PatientAccess />} />
+        <Route path="*" element={<Navigate to="/patient/dashboard" replace />} />
+      </Route>
+      
+      {/* Doctor Portal Routes */}
+      <Route path="/doctor/login" element={user?.role === 'doctor' ? <Navigate to="/doctor/dashboard" replace /> : <DoctorLogin />} />
+      <Route path="/doctor/register" element={user?.role === 'doctor' ? <Navigate to="/doctor/dashboard" replace /> : <DoctorLogin mode="register" />} />
       {isPendingDoctor && (
         <>
-          <Route path="/" element={
-            <ProtectedRoute>
-              <Layout />
+          <Route path="/doctor" element={
+            <ProtectedRoute allowedRoles={['doctor']} portal="doctor">
+              <DoctorLayout />
             </ProtectedRoute>
           }>
             <Route index element={<PendingApproval />} />
             <Route path="dashboard" element={<PendingApproval />} />
             <Route path="profile" element={
-              <ProtectedRoute allowedRoles={['doctor', 'patient', 'admin']}>
-                <Profile verificationStatus={verifyState.status} />
+              <ProtectedRoute allowedRoles={['doctor']} portal="doctor">
+                <DoctorProfile verificationStatus={verifyState.status} />
               </ProtectedRoute>
             } />
             <Route path="*" element={<PendingApproval />} />
           </Route>
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="/doctor/*" element={<Navigate to="/doctor" replace />} />
         </>
       )}
       {!isPendingDoctor && (
         <>
-          <Route path="/" element={
-            <ProtectedRoute>
-              <Layout />
+          <Route path="/doctor" element={
+            <ProtectedRoute allowedRoles={['doctor']} portal="doctor">
+              <DoctorLayout />
             </ProtectedRoute>
           }>
-            <Route index element={<Navigate to="/dashboard" replace />} />
-            <Route path="dashboard" element={<Dashboard />} />
-            <Route path="reports" element={
-              <ProtectedRoute allowedRoles={['doctor', 'patient']}>
-                <Reports />
-              </ProtectedRoute>
-            } />
-            <Route path="reports/:id" element={<Reports />} />
-            <Route path="prescriptions" element={
-              <ProtectedRoute allowedRoles={['doctor', 'patient']}>
-                <Prescriptions />
-              </ProtectedRoute>
-            } />
-            <Route path="patients" element={
-              <ProtectedRoute allowedRoles={['doctor']}>
-                <Patients />
-              </ProtectedRoute>
-            } />
-            <Route path="history" element={
-              <ProtectedRoute allowedRoles={['doctor', 'patient']}>
-                <History />
-              </ProtectedRoute>
-            } />
-            <Route path="profile" element={
-              <ProtectedRoute allowedRoles={['doctor', 'patient', 'admin']}>
-                <Profile />
-              </ProtectedRoute>
-            } />
-            <Route path="access" element={
-              <ProtectedRoute allowedRoles={['patient']}>
-                <AccessPrivacy />
-              </ProtectedRoute>
-            } />
-            <Route path="admin" element={
-              <ProtectedRoute allowedRoles={['admin']}>
-                <Admin />
-              </ProtectedRoute>
-            } />
-            <Route path="*" element={<NotFound />} />
+            <Route path="dashboard" element={<DoctorDashboard />} />
+            <Route path="patients" element={<DoctorPatients />} />
+            <Route path="prescriptions" element={<DoctorPrescriptions />} />
+            <Route path="reports" element={<DoctorReports />} />
+            <Route path="reports/:id" element={<DoctorReports />} />
+            <Route path="history" element={<DoctorHistory />} />
+            <Route path="access" element={<DoctorAccess />} />
+            <Route path="profile" element={<DoctorProfile />} />
+            <Route path="*" element={<Navigate to="/doctor/dashboard" replace />} />
           </Route>
-          {/* Unknown top-level route: controlled fallback, never a blank page. */}
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="/doctor/*" element={<Navigate to="/doctor" replace />} />
         </>
       )}
+      
+      {/* Admin Portal Routes */}
+      <Route path="/admin/login" element={user?.role === 'admin' ? <Navigate to="/admin/dashboard" replace /> : <AdminLogin />} />
+      <Route path="/admin" element={
+        <ProtectedRoute allowedRoles={['admin']} portal="admin">
+          <AdminLayout />
+        </ProtectedRoute>
+      }>
+        <Route index element={<Navigate to="/admin/dashboard" replace />} />
+        <Route path="dashboard" element={<Admin />} />
+        <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
+      </Route>
+      
+      {/* Legacy routes - redirect to appropriate portal */}
+      <Route path="/login" element={<Navigate to="/patient/login" replace />} />
+      <Route path="/register" element={<Navigate to="/patient/register" replace />} />
+      <Route path="/dashboard" element={<Navigate to="/patient/dashboard" replace />} />
+      
+      {/* Fallback */}
+      <Route path="*" element={<NotFound />} />
     </Routes>
   )
 }

@@ -78,6 +78,9 @@ def _patient_profile(pid="patient-1", user_id="patient-user-123"):
     p.blood_group = None
     p.allergies = []
     p.is_active = True
+    p.patient_code = "PAT-ABC12"
+    p.allow_prescriptions = True
+    p.emergency_token = None
     p.created_at = datetime.now(timezone.utc)
     p.updated_at = datetime.now(timezone.utc)
     return p

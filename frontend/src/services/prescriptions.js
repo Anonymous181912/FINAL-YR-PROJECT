@@ -1,7 +1,10 @@
 import api from './api'
 
 export async function createPrescription(payload) {
-  const response = await api.post('/prescriptions', payload)
+  // Trailing slash matches the backend route exactly; without it FastAPI
+  // answers 307 to an absolute URL and browsers drop Authorization on the
+  // cross-origin redirect (surfacing as a spurious 401/logout).
+  const response = await api.post('/prescriptions/', payload)
   return response.data
 }
 
@@ -48,6 +51,11 @@ export function downloadPrescriptionPdf(blob, filename = 'prescription.pdf') {
 
 export async function revokePrescription(prescriptionId) {
   const response = await api.post(`/prescriptions/${prescriptionId}/revoke`)
+  return response.data
+}
+
+export async function issuePrescription(prescriptionId) {
+  const response = await api.post(`/prescriptions/${prescriptionId}/issue`)
   return response.data
 }
 

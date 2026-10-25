@@ -1,15 +1,3 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
-from fastapi.responses import FileResponse
-from typing import List, Optional
-from app.auth.dependencies import get_current_user, get_current_verified_doctor, get_current_patient
-from app.schemas.prescription import PrescriptionCreate, PrescriptionUpdate, PrescriptionResponse
-from app.models.user import User
-from app.prescriptions.services.prescription_service import PrescriptionService, PrescriptionServiceError
-from app.prescriptions.services.pdf_service import PrescriptionPDFError
-
-router = APIRouter(prefix="/prescriptions", tags=["Prescriptions"])
-
-
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Query, UploadFile, File
 from fastapi.responses import FileResponse
 from typing import List, Optional
@@ -21,6 +9,8 @@ from app.prescriptions.services.pdf_service import PrescriptionPDFError
 from app.access import grants as grant_checks
 from app.audit.service import log_access, client_info
 from app.database.repositories.patient_repository import PatientRepository
+from app.database.repositories.doctor_repository import DoctorRepository
+from app.database.repositories.notification_repository import NotificationRepository
 
 router = APIRouter(prefix="/prescriptions", tags=["Prescriptions"])
 
@@ -29,14 +19,29 @@ router = APIRouter(prefix="/prescriptions", tags=["Prescriptions"])
 async def create_prescription(prescription_in: PrescriptionCreate, request: Request, current_user: User = Depends(get_current_verified_doctor)):
     service = PrescriptionService()
     try:
-        # Phase 3: prescribing needs an active "prescriptions" grant (403).
-        canonical = await grant_checks.canonical_patient_id(PatientRepository(), prescription_in.patient_id)
+        # A2: Check patient's prescribing permission setting
+        patient_repo = PatientRepository()
+        canonical = await grant_checks.canonical_patient_id(patient_repo, prescription_in.patient_id)
         if canonical is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient not found")
-        await grant_checks.require_grant_or_403(canonical, current_user.id, "prescriptions")
+        
+        patient = await patient_repo.get_by_patient_id(canonical)
+        if not patient:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient not found")
+        
+        # If patient has disabled prescriptions, return 403
+        if not patient.allow_prescriptions:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This patient has disabled prescription writing. Contact the patient to enable it in Access & Privacy."
+            )
+        
+        # If allow_prescriptions is ON, no grant needed for prescribing
+        # (Reading reports/labs/history still requires an approved grant)
+        
         prescription = await service.create_prescription(
             doctor_id=current_user.id,
-            patient_id=prescription_in.patient_id,
+            patient_id=canonical,
             prescription_date=prescription_in.prescription_date,
             diagnosis_notes=prescription_in.diagnosis_notes,
             advice=prescription_in.advice,
@@ -149,6 +154,64 @@ async def revoke_prescription(prescription_id: str, current_user: User = Depends
     if not revoked:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prescription not found")
     return revoked
+
+
+@router.post("/{prescription_id}/issue", response_model=PrescriptionResponse)
+async def issue_prescription(prescription_id: str, request: Request, current_user: User = Depends(get_current_verified_doctor)):
+    """Issue a draft prescription to the patient: sets status=issued, issued_at, generates PDF,
+    adds history event, and creates patient notification."""
+    service = PrescriptionService()
+    try:
+        # First, get the prescription to verify ownership and get patient info
+        prescription = await service.get_prescription(prescription_id, current_user.id, "doctor")
+        if not prescription:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prescription not found")
+        
+        if prescription.status == "issued":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Prescription already issued")
+        
+        # Update status to issued (this will set issued_at)
+        updated = await service.update_prescription(
+            prescription_id,
+            doctor_id=current_user.id,
+            status="issued",
+        )
+        if not updated:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prescription not found")
+        
+        # Generate PDF
+        try:
+            pdf_path = await service.generate_pdf(updated)
+        except PrescriptionPDFError as exc:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+        
+        # Create notification for patient
+        notification_repo = NotificationRepository()
+        doctor_repo = DoctorRepository()
+        doctor = await doctor_repo.get_by_doctor_id(current_user.id)
+        doctor_name = doctor.full_name if doctor else "Your doctor"
+        
+        await notification_repo.create_notification(
+            user_id=updated.patient_id,
+            kind="prescription_issued",
+            title="New Prescription Issued",
+            body=f"Dr {doctor_name} issued a new prescription for you.",
+            link="/patient/prescriptions",
+            ref_id=updated.id,
+        )
+        
+        # Audit log
+        ip, ua = client_info(request)
+        await log_access(current_user.id, current_user.role, "issue", "prescription",
+                         updated.id, updated.patient_id, ip, ua)
+        
+        return updated
+    except PrescriptionServiceError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to issue prescription")
 
 
 @router.post("/scan")

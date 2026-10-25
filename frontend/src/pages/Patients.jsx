@@ -530,7 +530,7 @@ export default function Patients() {
                     </span>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                       <Link
-                        to={`/prescriptions?patient=${encodeURIComponent(selectedPatient.patient_id || selectedPatient.user_id || selectedPatient.id)}&new=1`}
+                        to={`/doctor/prescriptions?patient=${encodeURIComponent(selectedPatient.patient_id || selectedPatient.user_id || selectedPatient.id)}&new=1`}
                         className="btn btn-primary btn-sm"
                         style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
                       >
@@ -538,7 +538,7 @@ export default function Patients() {
                         <span>Prescribe</span>
                       </Link>
                       <Link
-                        to={`/history`}
+                        to={`/doctor/history?patient=${encodeURIComponent(selectedPatient.patient_id || selectedPatient.user_id || selectedPatient.id)}`}
                         className="btn btn-secondary btn-sm"
                         style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
                       >

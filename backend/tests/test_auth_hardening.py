@@ -152,9 +152,9 @@ class TestPasswordReset:
 
 
 class TestLockout:
-    def _login(self, patch_user):
+    def _login(self, patch_user, portal="patient"):
         return client.post("/api/v1/auth/login",
-                           data={"username": "a@test.com", "password": "wrong"})
+                           data={"username": "a@test.com", "password": "wrong", "portal": portal})
 
     def test_five_failures_lock(self):
         from app.core.security import get_password_hash
@@ -183,6 +183,6 @@ class TestLockout:
             users.get_by_email.return_value = user
             user_cls.return_value = users
             r = client.post("/api/v1/auth/login",
-                            data={"username": "a@test.com", "password": "right123"})
+                            data={"username": "a@test.com", "password": "right123", "portal": "patient"})
             assert r.status_code == 403
             assert "locked" in r.json()["detail"].lower()

@@ -31,8 +31,24 @@ class PrescriptionRepository(BaseRepository):
         docs = await cursor.to_list(length=limit)
         return [PrescriptionInDB(**doc) for doc in docs]
 
-    async def list_by_patient(self, patient_id: str, skip: int = 0, limit: int = 20) -> list[PrescriptionInDB]:
-        cursor = self.collection.find({"patient_id": patient_id})
+    async def list_by_patient(self, patient_id: str, skip: int = 0, limit: int = 20, status: Optional[str] = None) -> list[PrescriptionInDB]:
+        query = {"patient_id": patient_id}
+        if status:
+            query["status"] = status
+        cursor = self.collection.find(query).sort("created_at", -1)
+        cursor.skip(skip).limit(limit)
+        docs = await cursor.to_list(length=limit)
+        return [PrescriptionInDB(**doc) for doc in docs]
+
+    async def list_by_patient_ids(self, patient_ids: list[str], skip: int = 0, limit: int = 20, status: Optional[str] = None) -> list[PrescriptionInDB]:
+        """List prescriptions across canonical/legacy patient identifiers."""
+        ids = sorted({pid for pid in patient_ids if isinstance(pid, str) and pid})
+        if not ids:
+            return []
+        query = {"patient_id": {"$in": ids}}
+        if status:
+            query["status"] = status
+        cursor = self.collection.find(query).sort("created_at", -1)
         cursor.skip(skip).limit(limit)
         docs = await cursor.to_list(length=limit)
         return [PrescriptionInDB(**doc) for doc in docs]

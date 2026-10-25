@@ -102,14 +102,23 @@ class TestSafetyService:
     def test_severe_blocks_create_without_ack(self):
         app.dependency_overrides[get_current_user] = lambda: _user("d1", "d@t.com", "doctor", "Dr")
         try:
-            with patch("app.prescriptions.services.prescription_service.PrescriptionRepository") as rx_cls, \
-                 patch("app.prescriptions.services.prescription_service.PatientRepository") as pat_cls, \
+            with patch("app.prescriptions.router.PatientRepository.get_by_patient_id", new_callable=AsyncMock) as mock_get_patient, \
+                 patch("app.prescriptions.services.prescription_service.PrescriptionRepository") as rx_cls, \
                  patch("app.prescriptions.services.prescription_service.DoctorRepository") as doc_cls:
-                pat = AsyncMock()
-                p = AsyncMock()
-                p.allergies = []
-                pat.get_by_patient_id.return_value = p
-                pat_cls.return_value = pat
+                from unittest.mock import MagicMock
+                from datetime import datetime, timezone
+                mock_patient = MagicMock()
+                mock_patient.allergies = []
+                mock_patient.patient_code = "PAT-ABC12"
+                mock_patient.allow_prescriptions = True
+                mock_patient.emergency_token = None
+                mock_patient.id = "p1"
+                mock_patient.user_id = "p1"
+                mock_patient.patient_id = "p1"
+                mock_patient.created_at = datetime.now(timezone.utc)
+                mock_patient.updated_at = datetime.now(timezone.utc)
+                mock_get_patient.return_value = mock_patient
+                
                 doc = AsyncMock()
                 doc.get_by_doctor_id.return_value = AsyncMock()
                 doc_cls.return_value = doc
@@ -128,14 +137,23 @@ class TestSafetyService:
     def test_severe_passes_with_ack_and_reason(self):
         app.dependency_overrides[get_current_user] = lambda: _user("d1", "d@t.com", "doctor", "Dr")
         try:
-            with patch("app.prescriptions.services.prescription_service.PrescriptionRepository") as rx_cls, \
-                 patch("app.prescriptions.services.prescription_service.PatientRepository") as pat_cls, \
+            with patch("app.prescriptions.router.PatientRepository.get_by_patient_id", new_callable=AsyncMock) as mock_get_patient, \
+                 patch("app.prescriptions.services.prescription_service.PrescriptionRepository") as rx_cls, \
                  patch("app.prescriptions.services.prescription_service.DoctorRepository") as doc_cls:
-                pat = AsyncMock()
-                p = AsyncMock()
-                p.allergies = []
-                pat.get_by_patient_id.return_value = p
-                pat_cls.return_value = pat
+                from unittest.mock import MagicMock
+                from datetime import datetime, timezone
+                mock_patient = MagicMock()
+                mock_patient.allergies = []
+                mock_patient.patient_code = "PAT-ABC12"
+                mock_patient.allow_prescriptions = True
+                mock_patient.emergency_token = None
+                mock_patient.id = "p1"
+                mock_patient.user_id = "p1"
+                mock_patient.patient_id = "p1"
+                mock_patient.created_at = datetime.now(timezone.utc)
+                mock_patient.updated_at = datetime.now(timezone.utc)
+                mock_get_patient.return_value = mock_patient
+                
                 doc = AsyncMock()
                 doc.get_by_doctor_id.return_value = AsyncMock()
                 doc_cls.return_value = doc
@@ -162,18 +180,27 @@ class TestSafetyService:
     def test_issue_blocked_without_ack(self):
         app.dependency_overrides[get_current_user] = lambda: _user("d1", "d@t.com", "doctor", "Dr")
         try:
-            with patch("app.prescriptions.services.prescription_service.PrescriptionRepository") as rx_cls, \
-                 patch("app.prescriptions.services.prescription_service.PatientRepository") as pat_cls:
+            with patch("app.prescriptions.router.PatientRepository.get_by_patient_id", new_callable=AsyncMock) as mock_get_patient, \
+                 patch("app.prescriptions.services.prescription_service.PrescriptionRepository") as rx_cls:
+                from unittest.mock import MagicMock
+                from datetime import datetime, timezone
+                mock_patient = MagicMock()
+                mock_patient.allergies = []
+                mock_patient.patient_code = "PAT-ABC12"
+                mock_patient.allow_prescriptions = True
+                mock_patient.emergency_token = None
+                mock_patient.id = "p1"
+                mock_patient.user_id = "p1"
+                mock_patient.patient_id = "p1"
+                mock_patient.created_at = datetime.now(timezone.utc)
+                mock_patient.updated_at = datetime.now(timezone.utc)
+                mock_get_patient.return_value = mock_patient
+                
                 rx = AsyncMock()
                 rx.get_by_id.return_value = _rx(items=[
                     {"medicine_name": "Warfarin", "dosage": "5mg", "frequency": "OD", "duration": "30 days"},
                     {"medicine_name": "Aspirin", "dosage": "75mg", "frequency": "OD", "duration": "30 days"}])
                 rx_cls.return_value = rx
-                pat = AsyncMock()
-                p = AsyncMock()
-                p.allergies = []
-                pat.get_by_patient_id.return_value = p
-                pat_cls.return_value = pat
                 r = client.put("/api/v1/prescriptions/rx1", json={"status": "issued"},
                                headers={"Authorization": f"Bearer {_token('d1', 'd@t.com', 'doctor')}"})
                 assert r.status_code == 400

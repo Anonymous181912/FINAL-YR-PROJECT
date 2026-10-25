@@ -10,9 +10,10 @@ import {
   generatePrescriptionPdf,
   downloadPrescriptionPdf,
   revokePrescription,
+  issuePrescription,
   scanPrescription,
 } from '../services/prescriptions'
-import { listPatients } from '../services/patients'
+import { listPatients, searchPatients } from '../services/patients'
 import {
   Pill,
   Plus,
@@ -33,7 +34,8 @@ import {
   ShieldCheck,
   QrCode,
   Ban,
-  ScanLine
+  ScanLine,
+  Send,
 } from 'lucide-react'
 
 const emptyItem = () => ({
@@ -96,6 +98,10 @@ export default function Prescriptions() {
   const [scanFile, setScanFile] = useState(null)
   const [scanLoading, setScanLoading] = useState(false)
   const [scanDraft, setScanDraft] = useState(null)
+  const [patientQuery, setPatientQuery] = useState('')
+  const [patientResults, setPatientResults] = useState([])
+  const [searchingPatient, setSearchingPatient] = useState(false)
+  const [selectedPatient, setSelectedPatient] = useState(null)
 
   const fetchPrescriptions = async () => {
     setLoading(true)
@@ -146,6 +152,9 @@ export default function Prescriptions() {
     setLastWarnings([])
     setScanDraft(null)
     setScanFile(null)
+    setPatientQuery('')
+    setPatientResults([])
+    setSelectedPatient(null)
   }
 
   const handleEdit = (rx) => {
@@ -180,6 +189,45 @@ export default function Prescriptions() {
     setItems(updated)
   }
 
+  const handlePatientSearch = async () => {
+    const q = patientQuery.trim()
+    if (!q) return
+    setSearchingPatient(true)
+    setError('')
+    try {
+      const results = await searchPatients(q, 10)
+      setPatientResults(results || [])
+      if (!results || results.length === 0) {
+        setError('No patient matched that name or patient code.')
+      }
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Patient lookup failed')
+    } finally {
+      setSearchingPatient(false)
+    }
+  }
+
+  const handleSelectPatient = (patient) => {
+    setSelectedPatient(patient)
+    setPatientId(patient.patient_id || patient.id)
+    setPatientResults([])
+    setPatientQuery('')
+  }
+
+  const handleIssue = async (rx) => {
+    if (!window.confirm(`Issue prescription #${rx.id.slice(-6)} to the patient? This notifies them and cannot be undone.`)) return
+    setError('')
+    setSuccessMsg('')
+    try {
+      await issuePrescription(rx.id)
+      setSuccessMsg('Prescription issued — the patient has been notified.')
+      await fetchPrescriptions()
+      setTimeout(() => setSuccessMsg(''), 4000)
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to issue prescription')
+    }
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
@@ -210,7 +258,7 @@ export default function Prescriptions() {
         setSuccessMsg('Prescription updated successfully')
       } else {
         saved = await createPrescription(payload)
-        setSuccessMsg('New prescription generated successfully')
+        setSuccessMsg('Draft saved — it stays hidden from the patient until you click "Issue to Patient".')
       }
       setLastWarnings(saved?.safety_warnings || [])
       resetForm()
@@ -392,6 +440,67 @@ export default function Prescriptions() {
           </div>
 
           <form onSubmit={handleSubmit}>
+            {/* Patient lookup by name or patient_code (A1) */}
+            {!editingId && (
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '14px 16px', marginBottom: 20 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600, fontSize: '0.9rem', color: '#0f172a', marginBottom: 8 }}>
+                  <Search size={14} color="#0ea5e9" />
+                  <span>Find patient by name or patient code</span>
+                </label>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <input
+                    type="text"
+                    value={patientQuery}
+                    onChange={(e) => setPatientQuery(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handlePatientSearch() } }}
+                    placeholder="e.g. PAT-7X9K2 or Jane Doe"
+                    className="form-control"
+                    style={{ flex: 1, minWidth: 220, background: 'white' }}
+                    aria-label="Search patient by name or patient code"
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={handlePatientSearch}
+                    disabled={searchingPatient || !patientQuery.trim()}
+                  >
+                    <Search size={14} />
+                    <span>{searchingPatient ? 'Searching...' : 'Search'}</span>
+                  </button>
+                </div>
+
+                {selectedPatient && (
+                  <div style={{ marginTop: 10, fontSize: '0.85rem', color: '#166534', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '8px 12px' }}>
+                    Selected: <strong>{selectedPatient.full_name}</strong>
+                    {selectedPatient.patient_code ? ` (${selectedPatient.patient_code})` : ''}
+                  </div>
+                )}
+
+                {patientResults.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
+                    {patientResults.map((p) => (
+                      <button
+                        type="button"
+                        key={p.id}
+                        onClick={() => handleSelectPatient(p)}
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                          textAlign: 'left', background: 'white', border: '1px solid #e2e8f0',
+                          borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: '0.86rem',
+                        }}
+                      >
+                        <span>
+                          <strong>{p.full_name}</strong>
+                          {p.age != null ? ` · ${p.age} yrs` : ''}
+                        </span>
+                        {p.patient_code && <span className="badge badge-primary">{p.patient_code}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Top Patient & Date Row */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 20 }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
@@ -698,7 +807,7 @@ export default function Prescriptions() {
                 disabled={loading}
                 style={{ minWidth: 160 }}
               >
-                {loading ? 'Saving...' : editingId ? 'Update Prescription' : 'Issue Prescription'}
+                {loading ? 'Saving...' : editingId ? 'Update Prescription' : 'Save as Draft'}
               </button>
             </div>
           </form>
@@ -711,7 +820,7 @@ export default function Prescriptions() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <FileText size={18} color="#0ea5e9" />
             <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 600 }}>
-              {isDoctor ? 'Issued Prescriptions' : 'My Prescriptions'}
+              {isDoctor ? 'Prescriptions (drafts & issued)' : 'My Prescriptions'}
             </h3>
           </div>
           <span className="badge badge-neutral">
@@ -742,7 +851,19 @@ export default function Prescriptions() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {prescriptions.map((rx) => {
               const dateStr = rx.prescription_date ? new Date(rx.prescription_date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : 'Date not set'
-              const status = rx.status || 'finalized'
+              const status = rx.status || 'draft'
+              const statusLabel = status === 'issued'
+                ? 'Issued'
+                : status === 'draft'
+                  ? 'Draft'
+                  : status.charAt(0).toUpperCase() + status.slice(1)
+              const statusClass = status === 'issued'
+                ? 'badge-success'
+                : status === 'draft'
+                  ? 'badge-warning'
+                  : status === 'revoked'
+                    ? 'badge-danger'
+                    : 'badge-neutral'
               const isPdfBusy = pdfLoadingId === rx.id
 
               return (
@@ -783,16 +904,8 @@ export default function Prescriptions() {
                           <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 600, color: '#0f172a' }}>
                             Prescription #{rx.id.slice(-6).toUpperCase()}
                           </h4>
-                          <span
-                            className="badge"
-                            style={{
-                              textTransform: 'capitalize',
-                              background: status === 'finalized' || status === 'active' ? '#f0fdf4' : '#f8fafc',
-                              color: status === 'finalized' || status === 'active' ? '#166534' : '#475569',
-                              border: `1px solid ${status === 'finalized' || status === 'active' ? '#bbf7d0' : '#e2e8f0'}`,
-                            }}
-                          >
-                            {status}
+                          <span className={`badge ${statusClass}`}>
+                            {statusLabel}
                           </span>
                         </div>
 
@@ -882,6 +995,16 @@ export default function Prescriptions() {
 
                       {isDoctor && (
                         <>
+                          {status === 'draft' && (
+                            <button
+                              className="btn btn-primary btn-sm"
+                              onClick={() => handleIssue(rx)}
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                            >
+                              <Send size={13} />
+                              <span>Issue to Patient</span>
+                            </button>
+                          )}
                           <button
                             className="btn btn-secondary btn-sm"
                             onClick={() => handleEdit(rx)}

@@ -58,6 +58,9 @@ def _create_mock_profile(profile_id, user_id, full_name, **kwargs):
         "is_verified": False,
         "verification_status": "pending",
         "is_active": True,
+        "patient_code": "PAT-ABC12",
+        "allow_prescriptions": True,
+        "emergency_token": None,
         "created_at": datetime.now(timezone.utc),
         "updated_at": datetime.now(timezone.utc),
     }
@@ -222,3 +225,73 @@ class TestDoctorProfile:
         response = client.get("/api/v1/doctors/me", headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 403
         app.dependency_overrides.pop(get_current_user, None)
+
+
+class TestPatientSearch:
+    def test_search_returns_canonical_patient_id_and_code(self):
+        app.dependency_overrides[get_current_user] = _override_doctor_user
+        try:
+            with patch("app.patients.router.PatientRepository") as mock_patient_repo:
+                profile = _create_mock_profile(
+                    "profile-1", "user-1", "Jane Doe",
+                    patient_id=None, patient_code="PAT-XYZ12",
+                )
+                mock_patient_instance = AsyncMock()
+                mock_patient_instance.search_patients.return_value = [profile]
+                mock_patient_repo.return_value = mock_patient_instance
+
+                token = _create_doctor_token()
+                response = client.get(
+                    "/api/v1/patients/search",
+                    params={"q": "jane"},
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                assert response.status_code == 200
+                data = response.json()
+                assert data[0]["full_name"] == "Jane Doe"
+                assert data[0]["patient_id"] == "user-1"
+                assert data[0]["patient_code"] == "PAT-XYZ12"
+                mock_patient_instance.search_patients.assert_awaited_once_with("jane", limit=20)
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+
+    def test_patient_cannot_search_patients(self):
+        app.dependency_overrides[get_current_user] = _override_patient_user
+        try:
+            token = _create_patient_token()
+            response = client.get(
+                "/api/v1/patients/search",
+                params={"q": "jane"},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert response.status_code == 403
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+
+
+class TestPrescriptionPermissionSetting:
+    def test_patient_can_disable_prescriptions(self):
+        app.dependency_overrides[get_current_user] = _override_patient_user
+        try:
+            with patch("app.patients.router.PatientRepository") as mock_patient_repo:
+                existing = _create_mock_profile("profile-1", "patient-user-123", "Test Patient")
+                updated = _create_mock_profile(
+                    "profile-1", "patient-user-123", "Test Patient",
+                    allow_prescriptions=False,
+                )
+                mock_patient_instance = AsyncMock()
+                mock_patient_instance.get_by_user_id.return_value = existing
+                mock_patient_instance.update_profile.return_value = updated
+                mock_patient_repo.return_value = mock_patient_instance
+
+                token = _create_patient_token()
+                response = client.put(
+                    "/api/v1/patients/me",
+                    json={"allow_prescriptions": False},
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                assert response.status_code == 200
+                assert response.json()["allow_prescriptions"] is False
+                assert mock_patient_instance.update_profile.await_args.kwargs["allow_prescriptions"] is False
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)

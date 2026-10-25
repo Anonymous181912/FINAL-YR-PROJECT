@@ -8,7 +8,7 @@ from app.auth.dependencies import get_current_user
 from app.database.repositories.user_repository import UserRepository
 from app.database.repositories.patient_repository import PatientRepository
 from app.database.repositories.doctor_repository import DoctorRepository
-from app.schemas.auth import Token, RegisterRequest
+from app.schemas.auth import Token, RegisterRequest, LoginRequest
 from app.auth.tokens import RefreshRequest, ForgotRequest, ResetRequest
 from app.models.user import User
 
@@ -24,6 +24,13 @@ async def register(request: Request, payload: RegisterRequest):
     the ``RegisterRequest`` schema. Only patient/doctor self-registration is
     allowed; admins are seeded from env (see scripts/seed_admin.py).
     """
+    # Validate portal matches role if provided
+    if payload.portal and payload.portal != payload.role:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Portal does not match role",
+        )
+    
     user_repo = UserRepository()
     if await user_repo.exists_email(payload.email):
         raise HTTPException(
@@ -68,13 +75,39 @@ async def register(request: Request, payload: RegisterRequest):
 
 @router.post("/login", response_model=Token)
 @limiter.limit("10/minute")
-async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends()):
+async def login(request: Request):
     from datetime import datetime, timezone
 
     from app.auth.tokens import RefreshTokenRepository
 
+    # Support both form data (OAuth2PasswordRequestForm) and JSON body
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        body = await request.json()
+        form_data = LoginRequest(**body)
+    else:
+        form = await request.form()
+        form_data = LoginRequest(
+            username=form.get("username", ""),
+            password=form.get("password", ""),
+            portal=form.get("portal", "patient"),
+            grant_type=form.get("grant_type", "password"),
+            scope=form.get("scope", ""),
+            client_id=form.get("client_id"),
+            client_secret=form.get("client_secret"),
+        )
+
     user_repo = UserRepository()
     user = await user_repo.get_by_email(form_data.username)
+
+    # Validate portal matches role
+    portal_role_map = {"patient": "patient", "doctor": "doctor", "admin": "admin"}
+    expected_role = portal_role_map.get(form_data.portal)
+    if user and user.role != expected_role:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid credentials for this portal",
+        )
 
     # Phase 6c: locked accounts stay locked even with the right password.
     if user is not None and user.locked_until is not None:
