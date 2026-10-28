@@ -107,11 +107,18 @@ _COUNT_RAW_THRESHOLD_BY_TEST = {
 # OCR often loses the slash or capitalisation in common units.
 _UNIT_DISPLAY = {
     "icumm": "/cumm",
+    "icmm": "/cmm",
     "cumm": "/cumm",
     "cmm": "/cmm",
     "gldl": "g/dL",
+    "gmie": "Gm%",
+    "gmle": "Gm%",
     "fl": "fL",
     "pg": "pg",
+    "lacsicmm": "LACS/CMM",
+    "lathscumm": "lakhs/cumm",
+    "millcmm": "million/cmm",
+    "milcmm": "million/cmm",
 }
 
 # OCR sometimes splits a row label onto two lines: "Absolute" /
@@ -134,7 +141,10 @@ def _fix_numeric_tokens(line: str) -> str:
         token = match.group(0)
         if not any(ch.isdigit() for ch in token):
             return token
-        return token.translate(_NUMERIC_OCR_MAP)
+        repaired = token.translate(_NUMERIC_OCR_MAP)
+        if re.fullmatch(r"\d+,\d{1,2}", repaired):
+            repaired = repaired.replace(",", ".")
+        return repaired
 
     return re.sub(
         r"(?<![\w])(?=[0-9OoIl|.,]*[0-9])([0-9OoIl|.,]+)(?![\w])",
@@ -224,6 +234,18 @@ def _display_unit(raw: str) -> str:
     return _UNIT_DISPLAY.get(norm, raw.strip())
 
 
+def _unit_alias(raw_unit: str) -> Optional[tuple[str, float]]:
+    """Return the global (family, factor) for a unit spelling, if known."""
+    norm = normalize_unit(raw_unit)
+    if not norm:
+        return None
+    hit = UNIT_ALIASES.get(norm)
+    if hit is None:
+        # Tolerate a trailing '.' or plural 's' OCR artefact.
+        hit = UNIT_ALIASES.get(norm.rstrip(".")) or UNIT_ALIASES.get(norm.rstrip("s"))
+    return hit
+
+
 def lookup_unit(canonical: str, raw_unit: str) -> Optional[tuple[str, float]]:
     """Resolve ``raw_unit`` for ``canonical`` -> (family, factor) or None.
 
@@ -235,13 +257,12 @@ def lookup_unit(canonical: str, raw_unit: str) -> Optional[tuple[str, float]]:
     # HbA1c IFCC special case (affine conversion handled by caller).
     if canonical == "hba1c" and norm in HBA1C_IFFC_ALIASES:
         return ("hba1c_ifcc", 0.0)
-    hit = UNIT_ALIASES.get(norm)
-    if hit is None:
-        # Tolerate a trailing '.' or plural 's' OCR artefact.
-        hit = UNIT_ALIASES.get(norm.rstrip(".")) or UNIT_ALIASES.get(norm.rstrip("s"))
+    hit = _unit_alias(raw_unit)
     if hit is None:
         return None
     family, factor = hit
+    if canonical == "mchc" and family == "percent":
+        return ("hb", 1.0)
     if family not in TEST_UNIT_FAMILIES.get(canonical, set()):
         return None
     if family == "mmol":
@@ -249,6 +270,47 @@ def lookup_unit(canonical: str, raw_unit: str) -> Optional[tuple[str, float]]:
         if factor is None:
             return None
     return (family, factor)
+
+
+def _fits_printed_scale(
+    value: float, printed: Optional[tuple[Optional[float], Optional[float]]]
+) -> bool:
+    """True when a value is on the same scale as its printed reference range.
+
+    This is deliberately an order-of-magnitude check, not a clinical flag: an
+    MCHC of 24.4 belongs with a 32-36 g/dL range even though it is low, while
+    a haemoglobin of 140 does not belong with a 13-18 g/dL range.
+    """
+    if printed is None:
+        return False
+    low, high = printed
+    if low is None and high is None:
+        return False
+    if (low or 0) == 0 and (high or 0) == 0:
+        return value == 0
+    if low is not None and low > 0 and value < low * 0.2:
+        return False
+    if high is not None and high > 0 and value > high * 5:
+        return False
+    return True
+
+
+def _fits_table_scale(
+    canonical: str, low: Optional[float], high: Optional[float]
+) -> bool:
+    """True when converted printed bounds look like the test's normal scale."""
+    if low is None and high is None:
+        return False
+    table_low, table_high, _ = _table_range(canonical, None)
+    if low is not None and low > 0 and low < table_low * 0.2:
+        return False
+    if low is not None and table_low > 0 and low > table_low * 5:
+        return False
+    if high is not None and high > 0 and high < table_high * 0.2:
+        return False
+    if high is not None and table_high > 0 and high > table_high * 5:
+        return False
+    return True
 
 
 def _convert_to_standard(canonical: str, value: float, family: str, factor: float) -> float:
@@ -306,11 +368,31 @@ def _flag(value: float, low: Optional[float], high: Optional[float]) -> str:
     return "normal"
 
 
+def _skip_result_flag(text: str) -> str:
+    """Drop annotations printed between a test name and its result.
+
+    Handles a short parenthetical abbreviation (``Total Leucocyte Count
+    (TLC) 7500``) and the L/H abnormality marker some labs print beside the
+    name (``Lymphocyte L 18``).
+    """
+    text = text or ""
+    for _ in range(3):
+        before = text
+        text = re.sub(r"^\s*\([A-Za-z0-9./ -]{1,15}\)\s*", "", text)
+        text = re.sub(r"^\s*\(\s*", "", text)
+        text = re.sub(r"^\s*[LH]\b[\s:.\-]*", "", text, flags=re.IGNORECASE)
+        if text == before:
+            break
+    return text
+
+
 def _extract_unit_text(after_value: str) -> str:
     """Take up to 3 whitespace-separated tokens as the unit candidate."""
     tokens = after_value.strip().split()
     if not tokens:
         return ""
+    if all(tok.strip(" ,;") == "%" for tok in tokens):
+        return "%"
     # Stop at anything that starts a new clause (e.g. "is", "was", "and").
     stop_words = {"is", "was", "are", "and", "with", "of", "at"}
     picked: list[str] = []
@@ -327,6 +409,53 @@ def _extract_unit_text(after_value: str) -> str:
             break
     unit = " ".join(picked).strip(" ,;")
     return unit
+
+
+def _standard_family(canonical: str) -> tuple[str, float]:
+    """Best default family/factor for a test when the unit is not printed."""
+    standard_unit = REFERENCE_RANGES[canonical]["standard_unit"]
+    hit = _unit_alias(standard_unit)
+    if hit is not None:
+        return hit
+    family = next(iter(TEST_UNIT_FAMILIES.get(canonical, {"percent"})), "percent")
+    return (family, 1.0)
+
+
+def _families_for(canonical: str) -> list[tuple[str, float]]:
+    """All plausible units for a test, standard family first, deduplicated."""
+    families: list[tuple[str, float]] = [_standard_family(canonical)]
+    for family in TEST_UNIT_FAMILIES.get(canonical, set()):
+        if family == families[0][0]:
+            continue
+        factor = 1.0
+        if family == "count_lakh":
+            factor = 100.0
+        elif family == "mmol":
+            factor = MMOL_PER_TEST_FACTOR.get(canonical, 1.0)
+        elif family == "hb_gl":
+            factor = 0.1
+        families.append((family, factor))
+    return families
+
+
+def _convert_bounds(
+    canonical: str,
+    printed: tuple[Optional[float], Optional[float]],
+    family: str,
+    factor: float,
+) -> tuple[Optional[float], Optional[float]]:
+    low, high = printed
+    std_low = (
+        _standard_measurement(canonical, low, family, factor)[0]
+        if low is not None
+        else None
+    )
+    std_high = (
+        _standard_measurement(canonical, high, family, factor)[0]
+        if high is not None
+        else None
+    )
+    return (std_low, std_high)
 
 
 def _build_result(
@@ -352,24 +481,42 @@ def _build_result(
         "source_text": source_text,
         "start": start,
         "end": end,
+        "unit_status": "missing" if not unit_raw else "unsupported",
+        "unit_note": "",
     }
     resolved = lookup_unit(canonical, unit_raw) if unit_raw else None
 
     if printed is not None:
         ref_low, ref_high = printed
+        candidates: list[tuple[str, float, str]] = []
         if resolved is not None:
-            family, factor = resolved
+            candidates.append((resolved[0], resolved[1], "known"))
+        for family, factor in _families_for(canonical):
+            if resolved is not None and family == resolved[0]:
+                continue
+            candidates.append((family, factor, "inconsistent" if unit_raw else "assumed"))
+
+        chosen: Optional[tuple[str, float, str, float, float, Optional[float], Optional[float]]] = None
+        for family, factor, status in candidates:
             std_value, std_unit = _standard_measurement(canonical, value, family, factor)
-            std_low = (
-                _standard_measurement(canonical, ref_low, family, factor)[0]
-                if ref_low is not None
-                else None
+            std_low, std_high = _convert_bounds(canonical, printed, family, factor)
+            scale_ok = status == "known" or _fits_table_scale(
+                canonical, std_low, std_high
             )
-            std_high = (
-                _standard_measurement(canonical, ref_high, family, factor)[0]
-                if ref_high is not None
-                else None
-            )
+            if _fits_printed_scale(std_value, (std_low, std_high)) and scale_ok:
+                chosen = (family, factor, status, std_value, std_unit, std_low, std_high)
+                break
+
+        if chosen is not None:
+            family, factor, status, std_value, std_unit, std_low, std_high = chosen
+            note = ""
+            if status == "assumed":
+                note = "Unit not printed; standard unit assumed from the printed reference range."
+            elif status == "inconsistent":
+                note = (
+                    f"Unit '{unit}' is inconsistent with the printed reference range; "
+                    f"value shown as {std_unit}."
+                )
             return {
                 **base,
                 "value": std_value,
@@ -378,18 +525,23 @@ def _build_result(
                 "ref_high": std_high,
                 "flag": _flag(std_value, std_low, std_high),
                 "range_source": "report",
+                "unit_status": status,
+                "unit_note": note,
             }
-        # Unknown/missing unit: keep the printed measurement untouched. It is
-        # still flaggable against its own printed range, but trend analysis
-        # will list it as not comparable because the unit is unresolved.
+
         return {
             **base,
             "value": value,
             "unit": unit,
             "ref_low": ref_low,
             "ref_high": ref_high,
-            "flag": _flag(value, ref_low, ref_high),
+            "flag": "unknown",
             "range_source": "report",
+            "unit_note": (
+                "No unit could be matched to the printed reference range."
+                if not unit_raw
+                else f"Unit '{unit}' cannot be matched to the printed reference range."
+            ),
         }
 
     table_low, table_high, source = _table_range(canonical, gender)
@@ -430,10 +582,43 @@ def _build_result(
     }
 
 
+def _lookahead_annotations(
+    entries: list[dict],
+    index: int,
+    canonical: str,
+    printed: Optional[tuple[Optional[float], Optional[float]]],
+    unit_raw: str,
+) -> tuple[Optional[tuple[Optional[float], Optional[float]]], str]:
+    """Pick up a unit/range printed on following lines of the same row.
+
+    Some OCR engines keep the label and result together but put the unit and
+    reference range underneath (e.g. ``TOTALLEUCOCYTE COUNT (TLC) 7500`` then
+    ``/cmm`` then ``4000-10,000``).
+    """
+    for next_index in range(index + 1, min(index + 6, len(entries))):
+        nxt = entries[next_index]["text"]
+        if not nxt:
+            continue
+        if _next_known_name(nxt):
+            break
+        if printed is None:
+            range_match = _RANGE_RE.search(nxt)
+            if range_match:
+                printed = _range_values(range_match)
+                if unit_raw and printed is not None:
+                    return (printed, unit_raw)
+                continue
+        if not unit_raw and lookup_unit(canonical, nxt) is not None:
+            unit_raw = nxt
+            if printed is not None:
+                return (printed, unit_raw)
+    return (printed, unit_raw)
+
+
 def _parse_inline_lines(entries: list[dict], gender: Optional[str]) -> list[dict]:
     """Classic layout: test name and result on the same line."""
     results: list[dict] = []
-    for entry in entries:
+    for index, entry in enumerate(entries):
         stripped = entry["text"]
         if not stripped:
             continue
@@ -459,6 +644,7 @@ def _parse_inline_lines(entries: list[dict], gender: Optional[str]) -> list[dict
             rest = clean[name_match.end():]
             sep = re.match(_SEP_RE, rest)
             rest_after_sep = rest[sep.end():] if sep else rest
+            rest_after_sep = _skip_result_flag(rest_after_sep)
             val_match = re.match(_VALUE_RE, rest_after_sep)
             if not val_match:
                 continue
@@ -467,14 +653,17 @@ def _parse_inline_lines(entries: list[dict], gender: Optional[str]) -> list[dict
                 continue
             after_value = rest_after_sep[val_match.end():]
             unit_raw = _extract_unit_text(after_value)
+            row_printed, row_unit = _lookahead_annotations(
+                entries, index, canonical, printed, unit_raw
+            )
 
             line_seen.add(canonical)
             results.append(
                 _build_result(
                     canonical,
                     value,
-                    unit_raw,
-                    printed,
+                    row_unit,
+                    row_printed,
                     entry["start"],
                     entry["end"],
                     entry["source"],
@@ -550,6 +739,7 @@ def _parse_stacked_blocks(
         rest = header_entry["text"][name_match.end():]
         sep = re.match(_SEP_RE, rest)
         after_name = rest[sep.end():] if sep else rest
+        after_name = _skip_result_flag(after_name)
         # Inline layout is handled by _parse_inline_lines, including lines
         # that only contain a reference range after the name.
         if re.match(_VALUE_RE, after_name):
@@ -579,6 +769,11 @@ def _parse_stacked_blocks(
             # (e.g. "x10^3/uL"). Continue scanning so a range printed AFTER
             # the unit (name / value / unit / range) is still picked up.
             if lookup_unit(canonical, nxt) is not None:
+                if not unit_raw:
+                    unit_raw = nxt
+                last_index = next_index
+                continue
+            if _unit_alias(nxt) is not None:
                 if not unit_raw:
                     unit_raw = nxt
                 last_index = next_index
@@ -732,6 +927,10 @@ def _date_label_source(line: str) -> Optional[str]:
     if any(
         token in lower
         for token in ("report", "reported", "registered", "registration")
+    ):
+        return "reported"
+    if re.search(r"\bdate\b", lower) and not re.search(
+        r"\b(dob|birth|age)\b", lower
     ):
         return "reported"
     return None

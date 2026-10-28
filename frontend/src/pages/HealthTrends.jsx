@@ -269,7 +269,9 @@ function DataQuality({ detail }) {
           <ul className="mt-2 space-y-1.5 text-xs leading-relaxed text-foreground-muted">
             {notComparable.map((item, index) => (
               <li key={`${item.report_id}-${index}`}>
-                {formatDate(item.collected_on)}: {item.reason}
+                <span className="font-medium text-foreground">{item.display_name || item.canonical_test}</span>
+                {' — '}
+                {formatDate(item.collected_on)} ({item.report_title || 'Report'}): {item.reason}
                 {item.unit ? ` (${item.unit})` : ''}
               </li>
             ))}
@@ -582,11 +584,24 @@ export default function HealthTrends() {
                     </p>
                   ))}
                   {(summary.not_comparable || []).length > 0 && (
-                    <p className="mt-1.5 text-xs text-foreground-muted">
-                      {(summary.not_comparable || []).length} stored value
-                      {(summary.not_comparable || []).length === 1 ? '' : 's'} could not be compared
-                      because the unit was missing or unsupported.
-                    </p>
+                    <div className="mt-1.5 text-xs text-foreground-muted">
+                      <p>
+                        {(summary.not_comparable || []).length} stored value
+                        {(summary.not_comparable || []).length === 1 ? '' : 's'} could not be compared:
+                      </p>
+                      <ul className="mt-1 space-y-1">
+                        {(summary.not_comparable || []).map((item, index) => (
+                          <li key={`${item.report_id}-${item.canonical_test}-${index}`}>
+                            <span className="font-medium text-foreground">
+                              {item.display_name || item.canonical_test}
+                            </span>
+                            {' — '}
+                            {formatDate(item.collected_on)} ({item.report_title || 'Report'}): {item.reason}
+                            {item.unit ? ` (${item.unit})` : ''}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   )}
                 </div>
               )}

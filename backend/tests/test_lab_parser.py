@@ -11,7 +11,11 @@ import os
 
 import pytest
 
-from app.reports.services.lab_parser import parse_lab_results, canonicalize_test_name
+from app.reports.services.lab_parser import (
+    canonicalize_test_name,
+    extract_report_date,
+    parse_lab_results,
+)
 
 _FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "lab_snippets.jsonl")
 
@@ -341,3 +345,149 @@ def test_collection_date_extracted_when_present():
     assert extract_collection_date(text) == "2023-06-24"
     assert extract_collection_date("Collection Date : 24-10-2026 10:45 AM") == "2026-10-24"
     assert extract_collection_date("No dates here") is None
+
+LABSMART_OCR = """Labsmart Software
+Collected on
+:17/10/2024
+Reported on
+:17/10/2024 04:55 PM
+HEMOGLOBIN
+15
+g/dl
+13 - 17
+TOTAL LEUKOCYTE COUNT
+5,100
+cumm
+4,800 - 10,800
+LYMPHOCYTE
+L
+18
+%
+20-40
+EOSINOPHILS
+%
+1-6
+MONOCYTES
+L
+1
+%
+2-10
+PLATELET COUNT
+3.5
+lakhs/cumm
+1.5 - 4.1
+TOTAL RBC COUNT
+5
+million/cumm
+4.5 - 5.5
+HEMATOCRIT VALUE, HCT
+42
+%
+40 - 50
+MEAN CORPUSCULAR VOLUME, MCV
+84.0
+fL
+83 - 101
+MEAN CELL HAEMOGLOBIN, MCH
+30.0
+Pg
+27-32
+MEAN CELL HAEMOGLOBIN CON, MCHC H
+35.7
+%
+31.5 - 34.5
+"""
+
+
+def test_labsmart_stacked_layout_flags_missing_values_and_units():
+    labs = parse_lab_results(LABSMART_OCR, gender="male")
+    by_canon = {r["canonical_name"]: r for r in labs}
+
+    assert by_canon["hemoglobin"]["value"] == 15.0
+    assert by_canon["wbc"]["value"] == 5.1
+    assert by_canon["wbc"]["original_unit"] == "/cumm"
+    assert by_canon["lymphocyte_percent"]["value"] == 18.0
+    assert by_canon["lymphocyte_percent"]["flag"] == "low"
+    assert by_canon["platelets"]["value"] == 350.0
+    assert by_canon["rbc"]["value"] == 5.0
+    assert by_canon["mcv"]["value"] == 84.0
+    assert by_canon["mchc"]["value"] == pytest.approx(35.7)
+    assert by_canon["mchc"]["unit"] == "g/dL"
+    assert by_canon["mchc"]["original_unit"] == "%"
+    assert by_canon["mchc"]["flag"] == "high"
+    assert "eosinophil_percent" not in by_canon
+    assert extract_report_date(LABSMART_OCR)[0] == "2024-10-17"
+
+
+def test_sahara_inline_result_with_next_line_unit_and_range():
+    text = """SAHARA PATHOLOGY LAB
+DATE-06/08/24
+HAEMOGLOBIN
+14.0
+Gm%
+13-18
+TOTALLEUCOCYTE COUNT (TLC) 7500
+/cmm
+4000-10,000
+NEUTROPHILES
+50
+% % % % %
+40-75
+LYMPHOCYTES
+55
+20-75
+PLATELETS COUNTS
+3.70
+LACS/CMM
+1.50-4.50
+RBCs COUNT
+2.37
+MIL/CMM
+4.5-5.5
+M.C.V.
+80
+PG
+80-96
+M.C.H.
+30
+FL
+28-32
+M.C.H.C.
+24.4
+32-36
+P.C.V.
+39.0
+%
+40-54
+"""
+
+    by_canon = {
+        r["canonical_name"]: r for r in parse_lab_results(text, gender="male")
+    }
+    assert by_canon["wbc"]["value"] == 7.5
+    assert by_canon["wbc"]["unit"] == "x10^3/uL"
+    assert by_canon["wbc"]["ref_low"] == 4.0
+    assert by_canon["neutrophil_percent"]["value"] == 50.0
+    assert by_canon["neutrophil_percent"]["unit_status"] == "assumed"
+    assert by_canon["platelets"]["value"] == 370.0
+    assert by_canon["rbc"]["value"] == pytest.approx(2.37)
+    assert by_canon["rbc"]["flag"] == "low"
+    assert by_canon["mcv"]["value"] == 80.0
+    assert by_canon["mcv"]["unit"] == "fL"
+    assert by_canon["mcv"]["unit_status"] == "inconsistent"
+    assert by_canon["mch"]["unit"] == "pg"
+    assert by_canon["mchc"]["value"] == pytest.approx(24.4)
+    assert by_canon["mchc"]["unit"] == "g/dL"
+    assert by_canon["mchc"]["unit_status"] == "assumed"
+    assert by_canon["hematocrit"]["value"] == 39.0
+    assert extract_report_date(text) == ("2024-08-06", "reported")
+
+
+def test_decimal_comma_and_percent_mchc_are_normalised():
+    by_canon = {
+        r["canonical_name"]: r
+        for r in parse_lab_results("M.C.V. 84,0 fL 80-96\nMCHC 35,7 % 31.5-34.5")
+    }
+    assert by_canon["mcv"]["value"] == 84.0
+    assert by_canon["mchc"]["value"] == pytest.approx(35.7)
+    assert by_canon["mchc"]["unit"] == "g/dL"
