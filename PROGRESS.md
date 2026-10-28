@@ -57,6 +57,15 @@
 - [x] README rewrite + USER_GUIDE.md demo script
 - [x] Suite: 249 passed; frontend build + 7 vitest pass
 
+## Done (Longitudinal health trends)
+- [x] Standardized stored lab values (`original_value`/`original_unit`, date source, range source)
+- [x] `GET /trends/summary`, `GET /trends/{test}`, patient-only point PATCH; doctor grant + audit checks
+- [x] Deterministic direction/events/duplicate handling, template explanation, not-comparable reporting
+- [x] Reparse script for existing reports; idempotent demo patient seed (3 reports, 6 tests)
+- [x] Patient/doctor Health Trends UI, chart + value table + exclude/correct controls, light/dark tokens
+- [x] Tests: `tests/test_trends_feature.py` (16) and frontend `HealthTrends.test.jsx` (2)
+- [x] Full suite: 298 passed, 1 unrelated failure (`matplotlib` missing in evaluation test); frontend build + 24 vitest pass
+
 ## Remaining
 - Nothing scheduled. Manual checks below.
 

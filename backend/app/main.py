@@ -17,6 +17,7 @@ from app.users.router import router as users_router
 from app.patients.router import router as patients_router
 from app.doctors.router import router as doctors_router
 from app.reports.router import router as reports_router
+from app.reports.trends_router import router as trends_router
 from app.prescriptions.router import router as prescriptions_router
 from app.history.router import router as history_router
 from app.core.rate_limit import limiter
@@ -100,5 +101,6 @@ app.include_router(users_router, prefix="/api/v1")
 app.include_router(patients_router, prefix="/api/v1")
 app.include_router(doctors_router, prefix="/api/v1")
 app.include_router(reports_router, prefix="/api/v1")
+app.include_router(trends_router, prefix="/api/v1")
 app.include_router(prescriptions_router, prefix="/api/v1")
 app.include_router(history_router, prefix="/api/v1")

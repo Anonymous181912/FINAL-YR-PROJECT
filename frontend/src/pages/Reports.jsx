@@ -1,12 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth.jsx'
-import { uploadReport, interpretReport, listReports, getReport, deleteReport, getLabTrends, LAB_TESTS, chatWithReport } from '../services/reports.js'
+import { uploadReport, interpretReport, listReports, getReport, deleteReport, chatWithReport } from '../services/reports.js'
 import { listPatients } from '../services/patients.js'
 import ConfirmDialog from '../components/ConfirmDialog.jsx'
-import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceArea,
-} from 'recharts'
 import {
   UploadCloud,
   FileText,
@@ -26,7 +23,6 @@ import {
    RefreshCw,
    Search,
    Trash2,
-   TrendingUp,
    FlaskConical,
    MessageCircle,
    Volume2,
@@ -109,111 +105,6 @@ export function LabResultsTable({ labs }) {
         Flags only show whether a value is inside or outside the reference range.
         Discuss any result with your doctor — this is an explanation, not a diagnosis.
       </p>
-    </div>
-  )
-}
-
-export function TrendsView({ patientId, isDoctor }) {
-  const [test, setTest] = useState('hemoglobin')
-  const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-
-  const fetchTrends = async (t = test) => {
-    if (isDoctor && !patientId) {
-      setData(null)
-      return
-    }
-    setLoading(true)
-    setError('')
-    try {
-      const res = await getLabTrends(t, isDoctor ? patientId : null)
-      setData(res)
-    } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to load trends')
-      setData(null)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    fetchTrends()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [test, patientId])
-
-  const chartData = (data?.points || []).map((p) => ({
-    date: p.date ? new Date(p.date).toLocaleDateString() : (p.title || p.report_id.slice(-6)),
-    value: p.value,
-    flag: p.flag,
-  }))
-
-  return (
-    <div className="card" style={{ marginTop: 28 }} data-testid="trends-view">
-      <div className="card-header">
-        <h3>
-          <TrendingUp size={20} color="var(--primary-600)" />
-          <span>Laboratory Trends</span>
-        </h3>
-        <select
-          value={test}
-          onChange={(e) => setTest(e.target.value)}
-          aria-label="Select lab test"
-          style={{ padding: '6px 10px', fontSize: '0.85rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--slate-200)' }}
-        >
-          {LAB_TESTS.map((t) => (
-            <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>
-          ))}
-        </select>
-      </div>
-
-      {isDoctor && !patientId && (
-        <p style={{ color: 'var(--slate-500)', fontSize: '0.9rem' }}>
-          Select a patient above to view their laboratory trends.
-        </p>
-      )}
-
-      {loading && <p style={{ color: 'var(--slate-500)', padding: 16 }}>Loading trend data...</p>}
-      {error && <div className="alert-banner alert-banner-danger">{error}</div>}
-
-      {!loading && !error && data && chartData.length < 2 && (
-        <div style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--slate-400)' }}>
-          <TrendingUp size={36} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
-          <p style={{ fontWeight: 600, color: 'var(--slate-700)' }}>Not enough data for a trend</p>
-          <p style={{ fontSize: '0.85rem' }}>
-            {data.display_name} needs at least 2 reports containing this test.
-            {chartData.length === 1 ? ' Only 1 matching report found so far.' : ' No matching reports found yet.'}
-          </p>
-        </div>
-      )}
-
-      {!loading && !error && data && chartData.length >= 2 && (
-        <div>
-          <p style={{ color: 'var(--slate-600)', fontSize: '0.88rem', marginBottom: 12 }}>
-            {data.display_name} ({data.unit}) — shaded band shows the reference range
-            ({data.ref_low} – {data.ref_high} {data.unit}).
-          </p>
-          <div style={{ width: '100%', height: 320 }}>
-            <ResponsiveContainer>
-              <LineChart data={chartData} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                <YAxis
-                  tick={{ fontSize: 12 }}
-                  domain={[Math.min(data.ref_low, ...chartData.map((d) => d.value)) * 0.95,
-                           Math.max(data.ref_high, ...chartData.map((d) => d.value)) * 1.05]}
-                />
-                <Tooltip />
-                <ReferenceArea y1={data.ref_low} y2={data.ref_high} fill="#10b981" fillOpacity={0.12} />
-                <Line type="monotone" dataKey="value" stroke="var(--primary-600)" strokeWidth={2} dot={{ r: 4 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-          <p style={{ color: 'var(--slate-500)', fontSize: '0.8rem', marginTop: 10 }}>
-            {data.disclaimer}
-          </p>
-        </div>
-      )}
     </div>
   )
 }
@@ -380,7 +271,6 @@ export default function Reports() {
   const [selectedPatientId, setSelectedPatientId] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [deletingId, setDeletingId] = useState(null)
-  const [mainTab, setMainTab] = useState('reports')
   const [language, setLanguage] = useState('en')
   const fileInputRef = useRef(null)
 
@@ -964,33 +854,6 @@ export default function Reports() {
         </div>
       )}
 
-      {/* Reports / Trends tabs */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 20 }} role="tablist" aria-label="Reports sections">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mainTab === 'reports'}
-          className={`btn btn-sm ${mainTab === 'reports' ? 'btn-primary' : 'btn-secondary'}`}
-          onClick={() => setMainTab('reports')}
-        >
-          <FileText size={14} /> Reports
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mainTab === 'trends'}
-          className={`btn btn-sm ${mainTab === 'trends' ? 'btn-primary' : 'btn-secondary'}`}
-          onClick={() => setMainTab('trends')}
-        >
-          <TrendingUp size={14} /> Lab Trends
-        </button>
-      </div>
-
-      {mainTab === 'trends' ? (
-        <TrendsView patientId={isDoctor ? selectedPatientId : null} isDoctor={isDoctor} />
-      ) : (
-      <>
-
       {/* Doctor patient picker (doctors review read-only; upload is patient-only) */}
       {isDoctor && (
         <div className="card">
@@ -1324,8 +1187,6 @@ export default function Reports() {
           </div>
         )}
       </div>
-      </> // end reports tab
-      )}
 
       {confirmDelete && (
         <ConfirmDialog

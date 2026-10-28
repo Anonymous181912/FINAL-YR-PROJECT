@@ -99,7 +99,7 @@ async def interpret_report(
         interpretation = await service.interpret_report(report, language=language)
         return interpretation
     except LLMServiceError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.public_message)
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Interpretation failed")
 
@@ -175,88 +175,6 @@ async def list_reports(
     # admin
     target_patient_id = patient_id or current_user.id
     return await repo.list_by_patient(target_patient_id, skip=skip, limit=limit)
-
-
-@router.get("/trends")
-async def get_lab_trends(
-    request: Request,
-    test: str = Query(..., min_length=1, max_length=100),
-    patient_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
-):
-    """Time series of one lab test across a patient's reports.
-
-    Patients always see their own data; verified doctors pass ``patient_id``
-    AND need an active consent grant (Phase 3). Fewer than 2 points is
-    still 200 with an empty ``points`` list — never an error.
-    """
-    from app.reports.services.lab_parser import canonicalize_test_name
-    from app.reports.services.reference_ranges import REFERENCE_RANGES
-    from app.database.repositories.patient_repository import PatientRepository
-
-    await _require_verified_doctor_if_doctor(current_user)
-    canonical = canonicalize_test_name(test)
-    if canonical is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unknown test '{test}'. Supported: {', '.join(sorted(REFERENCE_RANGES))}",
-        )
-
-    patient_repo = PatientRepository()
-    if current_user.role == "patient":
-        own = await patient_repo.get_by_user_id(current_user.id)
-        if own is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient profile not found")
-        target = await patient_repo.get_by_patient_id(own.patient_id or own.user_id or own.id)
-    elif current_user.role == "doctor":
-        if not patient_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="patient_id is required for doctor role")
-        target = await patient_repo.get_by_patient_id(patient_id)
-    else:  # admin
-        if not patient_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="patient_id is required for admin role")
-        target = await patient_repo.get_by_patient_id(patient_id)
-    if target is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient not found")
-    canonical_id = target.patient_id or target.user_id or target.id
-    if current_user.role == "doctor":
-        # Phase 3: per-patient consent on top of verification.
-        await grant_checks.require_active_grant(canonical_id, current_user.id, "reports")
-
-    service = ReportService()
-    reports = await service.report_repo.list_by_patient(canonical_id, limit=100)
-    reports = sorted(reports, key=lambda r: r.created_at or service.report_repo._now())
-
-    points = []
-    for rep in reports:
-        for lab in rep.lab_results or []:
-            if lab.get("canonical_name") == canonical:
-                points.append({
-                    "report_id": rep.id,
-                    "date": rep.created_at.isoformat() if rep.created_at else None,
-                    "title": rep.title,
-                    "value": lab.get("value"),
-                    "unit": lab.get("unit"),
-                    "flag": lab.get("flag"),
-                    "ref_low": lab.get("ref_low"),
-                    "ref_high": lab.get("ref_high"),
-                    "range_source": lab.get("range_source"),
-                })
-    table_range = REFERENCE_RANGES[canonical]["ranges"]["adult"]
-    band_low = min([p["ref_low"] for p in points if p["ref_low"] is not None], default=table_range[0])
-    band_high = max([p["ref_high"] for p in points if p["ref_high"] is not None], default=table_range[1])
-    ip, ua = client_info(request)
-    await log_access(current_user.id, current_user.role, "read", "report_trends",
-                     canonical, canonical_id, ip, ua)
-    return {
-        "test": canonical,
-        "display_name": REFERENCE_RANGES[canonical]["display_name"],
-        "unit": REFERENCE_RANGES[canonical]["standard_unit"],
-        "points": points,
-        "ref_low": band_low,
-        "ref_high": band_high,
-        "disclaimer": "Educational reference ranges, not clinical advice. Discuss trends with your doctor — this is an explanation, not a diagnosis.",
-    }
 
 
 @router.delete("/{report_id}", status_code=status.HTTP_204_NO_CONTENT)

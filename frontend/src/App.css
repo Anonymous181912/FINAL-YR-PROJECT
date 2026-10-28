@@ -342,7 +342,7 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .page-header-title p {
-  color: var(--slate-500);
+  color: var(--slate-600);
   font-size: 0.95rem;
   margin-top: 6px;
 }
@@ -492,26 +492,38 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, var(--primary-500), var(--primary-600));
+  background: linear-gradient(135deg, var(--primary-700), var(--primary-800, #1e40af));
   color: var(--white);
   box-shadow: 0 2px 6px rgba(14, 165, 233, 0.25);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: linear-gradient(135deg, var(--primary-600), var(--primary-700));
+  background: linear-gradient(135deg, var(--primary-800, #1e40af), var(--primary-900, #1e3a8a));
   box-shadow: 0 4px 12px rgba(14, 165, 233, 0.35);
   transform: translateY(-1px);
 }
 
 .btn-teal {
-  background: linear-gradient(135deg, var(--teal-500), var(--teal-600));
+  background: linear-gradient(135deg, var(--teal-700), var(--teal-800, #115e59));
   color: var(--white);
   box-shadow: 0 2px 6px rgba(20, 184, 166, 0.25);
 }
 
 .btn-teal:hover:not(:disabled) {
-  background: linear-gradient(135deg, var(--teal-600), var(--teal-700));
+  background: linear-gradient(135deg, var(--teal-800, #115e59), var(--teal-900, #134e4a));
   box-shadow: 0 4px 12px rgba(20, 184, 166, 0.35);
+  transform: translateY(-1px);
+}
+
+.btn-navy {
+  background: linear-gradient(135deg, #1e3a5f, #0f172a);
+  color: var(--white);
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.3);
+}
+
+.btn-navy:hover:not(:disabled) {
+  background: linear-gradient(135deg, #16304f, #060b14);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.4);
   transform: translateY(-1px);
 }
 
@@ -1062,8 +1074,8 @@ h1, h2, h3, h4, h5, h6 {
 .auth-page-container {
   min-height: 100vh;
   display: flex;
-  background: linear-gradient(135deg, var(--slate-900), #111827);
-  color: var(--white);
+  background: #0f172a;
+  color: var(--slate-900);
 }
 
 .auth-hero-pane {
@@ -1072,7 +1084,7 @@ h1, h2, h3, h4, h5, h6 {
   flex-direction: column;
   justify-content: space-between;
   padding: 60px;
-  background: radial-gradient(circle at top right, rgba(14, 165, 233, 0.15), transparent 60%);
+  background: #0f172a;
   border-right: 1px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -1082,7 +1094,8 @@ h1, h2, h3, h4, h5, h6 {
   align-items: center;
   justify-content: center;
   padding: 40px;
-  background: var(--slate-900);
+  background: var(--white);
+  color: var(--slate-900);
 }
 
 .auth-card {
@@ -1199,7 +1212,7 @@ h1, h2, h3, h4, h5, h6 {
 .empty-state {
   text-align: center;
   padding: 40px 20px;
-  color: var(--slate-400);
+  color: var(--slate-500);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1356,3 +1369,55 @@ textarea:focus-visible {
   }
 }
 
+
+/* ==========================================================================
+   Auth pages: fixed, deliberate portal theme (never follows the OS setting).
+   The global dark palette must not invert these pages, so re-declare the
+   light slate tokens on the auth scopes and fix the form pane to white.
+   ========================================================================== */
+.auth-page-container {
+  --slate-50: #f8fafc;
+  --slate-100: #f1f5f9;
+  --slate-200: #e2e8f0;
+  --slate-300: #cbd5e1;
+  --slate-400: #94a3b8;
+  --slate-500: #64748b;
+  --slate-600: #475569;
+  --slate-700: #334155;
+  --slate-800: #1e293b;
+  --slate-900: #0f172a;
+  --white: #ffffff;
+  background: #0f172a;
+  color: var(--slate-900);
+}
+
+.auth-page-container[data-portal="patient"] .auth-hero-pane {
+  background: linear-gradient(135deg, #0f766e 0%, #115e59 100%);
+}
+
+.auth-page-container[data-portal="doctor"] .auth-hero-pane {
+  background: linear-gradient(135deg, #0369a1 0%, #1e40af 100%);
+}
+
+.auth-page-container[data-portal="admin"] .auth-hero-pane {
+  background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%);
+}
+
+.auth-form-pane {
+  background: var(--white);
+  color: var(--slate-900);
+}
+
+.auth-page-container input,
+.auth-page-container select,
+.auth-page-container textarea {
+  background: var(--slate-50);
+  color: var(--slate-900);
+  border-color: var(--slate-200);
+}
+
+.auth-page-container input::placeholder,
+.auth-page-container textarea::placeholder {
+  color: var(--slate-500);
+  opacity: 1;
+}

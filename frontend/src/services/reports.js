@@ -45,16 +45,24 @@ export async function getReportLabs(reportId) {
   return response.data
 }
 
-export async function getLabTrends(test, patientId = null) {
-  const params = { test }
+export async function getTrendSummary(patientId = null) {
+  const params = {}
   if (patientId) params.patient_id = patientId
-  const response = await api.get('/reports/trends', { params })
+  const response = await api.get('/trends/summary', { params })
   return response.data
 }
 
-export const LAB_TESTS = [
-  'hemoglobin', 'rbc', 'wbc', 'platelets', 'hematocrit',
-  'fasting_glucose', 'random_glucose', 'hba1c', 'total_cholesterol',
-  'ldl', 'hdl', 'triglycerides', 'creatinine', 'urea_bun',
-  'alt', 'ast', 'tsh', 'sodium', 'potassium', 'vitamin_d',
-]
+export async function getTrendDetail(canonicalTest, patientId = null) {
+  const params = {}
+  if (patientId) params.patient_id = patientId
+  const response = await api.get(`/trends/${encodeURIComponent(canonicalTest)}`, { params })
+  return response.data
+}
+
+export async function updateTrendPoint(canonicalTest, reportId, payload) {
+  const response = await api.patch(
+    `/trends/${encodeURIComponent(canonicalTest)}/points/${encodeURIComponent(reportId)}`,
+    payload,
+  )
+  return response.data
+}

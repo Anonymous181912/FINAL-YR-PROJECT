@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { useFixedLightTheme } from '../utils/useFixedLightTheme.js'
 import {
   Stethoscope,
   User,
@@ -15,15 +16,17 @@ import {
 } from 'lucide-react'
 
 export default function Landing() {
+  useFixedLightTheme()
+
   return (
     <div className="min-h-screen bg-background">
       {/* Hero Section */}
-      <section className="relative overflow-hidden bg-gradient-to-b from-slate-50 to-white dark:from-slate-900 dark:to-slate-800">
+      <section className="relative bg-gradient-to-b from-slate-50 to-white dark:from-slate-900 dark:to-slate-800">
         <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-5" />
         
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 lg:py-32">
           <div className="text-center max-w-3xl mx-auto">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary-50 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 text-sm font-medium mb-6">
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 text-sm font-medium mb-6">
               <Sparkles size={16} />
               <span>Digital Healthcare Platform</span>
             </div>
@@ -49,7 +52,7 @@ export default function Landing() {
             </div>
             
             <p className="text-sm text-foreground-muted">
-              <Link to="/admin/login" className="text-primary-600 hover:underline">Admin Portal</Link>
+              <Link to="/admin/login" className="text-primary-700 hover:underline">Admin Portal</Link>
             </p>
           </div>
         </div>
@@ -58,19 +61,19 @@ export default function Landing() {
         <div className="absolute bottom-[-60px] left-4 right-4 lg:left-1/2 lg:right-auto lg:w-[calc(50%-2rem)] lg:ml-8 z-10">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <FeatureCard 
-              icon={<Brain />}
+              icon={Brain}
               title="AI-Powered NLP"
               description="Rule-based clinical entity extraction with deterministic results"
               color="teal"
             />
             <FeatureCard 
-              icon={<ShieldCheck />}
+              icon={ShieldCheck}
               title="Safety First"
               description="Medication interaction checking with allergy alerts"
               color="primary"
             />
             <FeatureCard 
-              icon={<FileText />}
+              icon={FileText}
               title="Digital Prescriptions"
               description="Verified PDF generation with QR code verification"
               color="amber"
@@ -96,11 +99,11 @@ export default function Landing() {
             <div className="bg-teal-50 dark:bg-teal-900/20 rounded-2xl p-8 border border-teal-100 dark:border-teal-800">
               <div className="flex items-center gap-3 mb-6">
                 <div className="w-12 h-12 rounded-xl bg-teal-100 dark:bg-teal-900/50 flex items-center justify-center">
-                  <User size={24} className="text-teal-600 dark:text-teal-400" />
+                  <User size={24} className="text-teal-700 dark:text-teal-400" />
                 </div>
                 <div>
                   <h3 className="text-2xl font-bold font-heading text-foreground">Patient Portal</h3>
-                  <p className="text-teal-600 dark:text-teal-400 font-medium">Personal Health Management</p>
+                  <p className="text-teal-700 dark:text-teal-400 font-medium">Personal Health Management</p>
                 </div>
               </div>
               <ul className="space-y-4">
@@ -113,7 +116,7 @@ export default function Landing() {
                   { icon: Users, label: "Profile", desc: "Manage personal info and emergency contacts" },
                 ].map((item, i) => (
                   <li key={i} className="flex items-start gap-3">
-                    <item.icon size={20} className="text-teal-500 shrink-0 mt-0.5" />
+                    <item.icon size={20} className="text-teal-700 shrink-0 mt-0.5" />
                     <div>
                       <p className="font-medium text-foreground">{item.label}</p>
                       <p className="text-sm text-foreground-muted">{item.desc}</p>
@@ -127,11 +130,11 @@ export default function Landing() {
             <div className="bg-primary-50 dark:bg-primary-900/20 rounded-2xl p-8 border border-primary-100 dark:border-primary-800">
               <div className="flex items-center gap-3 mb-6">
                 <div className="w-12 h-12 rounded-xl bg-primary-100 dark:bg-primary-900/50 flex items-center justify-center">
-                  <Stethoscope size={24} className="text-primary-600 dark:text-primary-400" />
+                  <Stethoscope size={24} className="text-primary-700 dark:text-primary-400" />
                 </div>
                 <div>
                   <h3 className="text-2xl font-bold font-heading text-foreground">Doctor Portal</h3>
-                  <p className="text-primary-600 dark:text-primary-400 font-medium">Clinical Workspace</p>
+                  <p className="text-primary-700 dark:text-primary-400 font-medium">Clinical Workspace</p>
                 </div>
               </div>
               <ul className="space-y-4">
@@ -144,7 +147,7 @@ export default function Landing() {
                   { icon: HeartPulse, label: "Profile", desc: "License info and verification status" },
                 ].map((item, i) => (
                   <li key={i} className="flex items-start gap-3">
-                    <item.icon size={20} className="text-primary-500 shrink-0 mt-0.5" />
+                    <item.icon size={20} className="text-primary-700 shrink-0 mt-0.5" />
                     <div>
                       <p className="font-medium text-foreground">{item.label}</p>
                       <p className="text-sm text-foreground-muted">{item.desc}</p>
@@ -168,7 +171,7 @@ export default function Landing() {
             ].map((item, i) => (
               <div key={i} className="p-6">
                 <div className="w-16 h-16 mx-auto mb-4 rounded-xl bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
-                  <item.icon size={28} className="text-primary-600 dark:text-primary-400" />
+                  <item.icon size={28} className="text-primary-700 dark:text-primary-400" />
                 </div>
                 <h3 className="text-xl font-bold font-heading text-foreground mb-2">{item.title}</h3>
                 <p className="text-foreground-muted">{item.desc}</p>
@@ -214,7 +217,7 @@ export default function Landing() {
               </ul>
             </div>
           </div>
-          <div className="border-t border-slate-800 pt-8 text-center text-sm text-slate-500">
+          <div className="border-t border-slate-800 pt-8 text-center text-sm text-slate-400">
             <p>Final Year Engineering Project &copy; {new Date().getFullYear()} &bull; FastAPI + React + MongoDB</p>
           </div>
         </div>
@@ -228,17 +231,17 @@ function FeatureCard({ icon: Icon, title, description, color }) {
     teal: {
       card: 'bg-teal-50 dark:bg-teal-900/20 border-teal-100 dark:border-teal-800',
       iconWrap: 'bg-teal-100 dark:bg-teal-900/50',
-      icon: 'text-teal-600 dark:text-teal-400',
+      icon: 'text-teal-700 dark:text-teal-400',
     },
     primary: {
       card: 'bg-primary-50 dark:bg-primary-900/20 border-primary-100 dark:border-primary-800',
       iconWrap: 'bg-primary-100 dark:bg-primary-900/50',
-      icon: 'text-primary-600 dark:text-primary-400',
+      icon: 'text-primary-700 dark:text-primary-400',
     },
     amber: {
       card: 'bg-amber-50 dark:bg-amber-900/20 border-amber-100 dark:border-amber-800',
       iconWrap: 'bg-amber-100 dark:bg-amber-900/50',
-      icon: 'text-amber-600 dark:text-amber-400',
+      icon: 'text-amber-700 dark:text-amber-400',
     },
   }
 

@@ -197,7 +197,7 @@ export default function DoctorDashboard() {
           {loading && <p style={{ color: 'var(--slate-500)', padding: 12 }}>Loading patients...</p>}
 
           {!loading && patients.length === 0 && (
-            <div style={{ textAlign: 'center', padding: '36px 16px', color: 'var(--slate-400)' }}>
+            <div style={{ textAlign: 'center', padding: '36px 16px', color: 'var(--slate-500)' }}>
               <Users size={36} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
               <p style={{ fontWeight: 600, color: 'var(--slate-700)' }}>No patients registered yet</p>
               <p style={{ fontSize: '0.85rem' }}>Patient records will appear here once registered</p>
@@ -264,7 +264,7 @@ export default function DoctorDashboard() {
           )}
 
           {!loading && prescriptions.length === 0 && (
-            <div style={{ textAlign: 'center', padding: '36px 16px', color: 'var(--slate-400)' }}>
+            <div style={{ textAlign: 'center', padding: '36px 16px', color: 'var(--slate-500)' }}>
               <Pill size={36} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
               <p style={{ fontWeight: 600, color: 'var(--slate-700)' }}>No prescriptions found</p>
               <p style={{ fontSize: '0.85rem' }}>Create your first digital prescription for a patient</p>

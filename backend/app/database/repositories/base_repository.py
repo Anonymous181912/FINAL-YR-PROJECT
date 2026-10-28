@@ -19,7 +19,7 @@ class BaseRepository:
         return datetime.now(timezone.utc)
 
     async def create(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        data["id"] = self._generate_id()
+        data.setdefault("id", self._generate_id())
         data["created_at"] = self._now()
         data["updated_at"] = self._now()
         await self.collection.insert_one(data)

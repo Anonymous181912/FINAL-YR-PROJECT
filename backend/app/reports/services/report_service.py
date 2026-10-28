@@ -1,11 +1,13 @@
 import os
 import logging
+import uuid
 from typing import Optional
 from fastapi import UploadFile
 from app.core.config import settings
 from app.reports.services.file_validation import FileValidator, FileValidationError
 from app.reports.services.pdf_extraction import PDFExtractionService, PDFExtractionError
 from app.reports.services.normalization import TextNormalizationService
+from app.reports.services.trend_service import enrich_lab_results
 from app.reports.ai.ocr import OCRService, OCRServiceError
 from app.reports.ai.medical_nlp import MedicalNLPService, MedicalNLPError
 from app.reports.ai.llm import LLMService, LLMServiceError
@@ -200,19 +202,31 @@ class ReportService:
 
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
+        report_id = str(uuid.uuid4())
 
         # Phase 1: deterministic lab parsing (never breaks the upload).
         lab_results: list[dict] = []
         if status == "completed" and extracted_text.strip():
             try:
                 lab_results = await self._parse_labs(extracted_text, patient_id)
+                lab_results = enrich_lab_results(
+                    lab_results,
+                    report_id=report_id,
+                    report_text=extracted_text,
+                    created_at=now,
+                )
             except Exception as exc:
                 logger.warning(f"Lab parsing failed (non-fatal): {exc}")
+        if lab_results:
+            # Lab values are measurements too; expose them as NLP entities so
+            # CBC-only reports no longer show "0 entities identified".
+            entities = [*entities, *self._lab_measurement_entities(lab_results)]
 
         report = await self.report_repo.create_report(
             patient_id=patient_id,
             category=category,
             title=title,
+            id=report_id,
             file_path=full_path,
             file_name=file.filename,
             file_size=file_size,
@@ -272,6 +286,36 @@ class ReportService:
         except Exception as exc:
             logger.warning(f"Patient lookup for lab parsing failed (non-fatal): {exc}")
         return parse_lab_results(extracted_text, gender=gender, age_years=age_years)
+
+    @staticmethod
+    def _lab_measurement_entities(lab_results: list[dict]) -> list[dict]:
+        """Represent parsed lab values as measurement entities.
+
+        The rule-based NLP extractor targets narrative findings (diseases,
+        organs, symptoms, radiology findings). A CBC-only report therefore has
+        no NLP entities even though it contains many measurements. Adding the
+        deterministic lab values keeps the entity count and AI context useful.
+        """
+        entities: list[dict] = []
+        for lab in lab_results or []:
+            value = lab.get("value")
+            if value is None:
+                continue
+            name = lab.get("name") or lab.get("canonical_name") or "Lab result"
+            flag = lab.get("flag")
+            entities.append({
+                "type": "measurement",
+                "text": name,
+                "normalized_text": lab.get("canonical_name") or name.lower(),
+                "value": str(value),
+                "unit": lab.get("unit") or "",
+                "severity": flag if flag in ("low", "high") else None,
+                "negated": False,
+                "context": lab.get("source_text"),
+                "confidence": 0.9,
+                "source_text": lab.get("source_text"),
+            })
+        return entities
 
     # ---- Phase 4d: background processing ---------------------------------
     async def save_incoming_file(self, file: UploadFile) -> tuple[str, int]:
@@ -362,14 +406,22 @@ class ReportService:
         elif status == "completed":
             nlp_status = "completed"
 
+        now = datetime.now(timezone.utc)
         lab_results: list[dict] = []
         if status == "completed" and extracted_text.strip():
             try:
                 lab_results = await self._parse_labs(extracted_text, patient_id)
+                lab_results = enrich_lab_results(
+                    lab_results,
+                    report_id=report_id,
+                    report_text=extracted_text,
+                    created_at=now,
+                )
             except Exception as exc:
                 logger.warning(f"Background lab parsing failed (non-fatal): {exc}")
+        if lab_results:
+            entities = [*entities, *self._lab_measurement_entities(lab_results)]
 
-        now = datetime.now(timezone.utc)
         await self.report_repo.update_processing(
             report_id,
             extraction_method=extraction_method,

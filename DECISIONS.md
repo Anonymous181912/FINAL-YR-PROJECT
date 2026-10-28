@@ -163,6 +163,32 @@ Append-only record of significant assumptions and choices. Newest at the bottom.
   no secret-looking lines in examples, .env git-ignored.
 - Suite: 249 passed; `npm run build` + `npm test` pass.
 
+## Longitudinal health trends (2026-10-28)
+
+- Supersedes the Phase 1 `/reports/trends` route and Reports "Lab Trends" tab.
+  New routes: `GET /trends/summary`, `GET /trends/{canonical_test}`, and
+  patient-only `PATCH /trends/{canonical_test}/points/{report_id}`. Doctors must
+  pass `patient_id`, need an active grant, and get 404 when it is missing.
+- Stored lab values keep both standardized and original units; bounds are
+  converted with the value. A missing/unusable unit is not coerced: it is
+  excluded from the series and counted under `not_comparable`.
+- Date priority is collection date printed on the report, then reported date,
+  then upload date. The source is returned so the UI can explain fallbacks.
+  Duplicate reports with the same normalized value and date collapse to one
+  point instead of pretending there are two observations.
+- Change is latest vs previous; stable means `abs(change_pct) < 5%`
+  (`TREND_STABLE_THRESHOLD_PCT`). The template explanation compares first to
+  latest, states range events, and always ends with the non-diagnosis
+  disclaimer. No AI/variable prose is generated for trends.
+- Patients can exclude a point or correct a transcription error for that trend
+  only; corrections are audited and reparse scripts preserve them. Doctors are
+  read-only. A single point is `insufficient_data` with no fabricated trend.
+- Reparse/backfill is explicit (`scripts/reparse_labs.py`); demo data is
+  idempotent (`scripts/seed_demo_trends.py`). Existing reports are never
+  silently rewritten during unrelated reads.
+- Suite: 298 passed, 1 unrelated evaluation failure because `matplotlib` is
+  absent on Python 3.13; frontend 24 vitest pass + build passes.
+
 ## Phase 0 — Security fixes (2026-09-19)
 
 - **No git binary in this environment.** The task requires working on branch

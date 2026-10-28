@@ -183,6 +183,45 @@ class TestLanguage:
             app.dependency_overrides.pop(get_current_user, None)
 
 
+class TestInterpretErrorSanitization:
+    def test_provider_detail_is_not_leaked(self):
+        from app.reports.ai.llm import AI_BUSY_MESSAGE, LLMServiceError
+        from app.reports.services.report_service import ReportService
+
+        app.dependency_overrides[get_current_user] = lambda: _user("p1", "p@t.com", "patient", "P")
+        try:
+            report = AsyncMock()
+            report.id = "r1"
+            report.patient_id = "p1"
+            report.category = "Blood Test"
+            report.title = "CBC"
+            report.extracted_text = "Hemoglobin 14 g/dL"
+            report.entities = []
+
+            with patch("app.reports.services.report_service.ReportRepository") as repo_cls, \
+                 patch.object(
+                     ReportService,
+                     "interpret_report",
+                     new=AsyncMock(side_effect=LLMServiceError(
+                         "provider raw: org_123 billing https://billing.example.test",
+                         public_message=AI_BUSY_MESSAGE,
+                     )),
+                 ):
+                repo = AsyncMock()
+                repo.get_by_id.return_value = report
+                repo_cls.return_value = repo
+                r = client.post(
+                    "/api/v1/reports/r1/interpret",
+                    headers={"Authorization": f"Bearer {_token('p1', 'p@t.com', 'patient')}"},
+                )
+                assert r.status_code == 502
+                assert r.json()["detail"] == AI_BUSY_MESSAGE
+                assert "org_123" not in r.text
+                assert "billing" not in r.text
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+
+
 class TestBackgroundUpload:
     def test_async_mode_returns_processing_then_completes(self):
         import tempfile
@@ -262,7 +301,12 @@ class TestRepairRetry:
                     content = json.dumps(good)
                 return {"choices": [{"message": {"content": content}}], "usage": {}}
 
-            with patch.object(LLMService, "__init__", lambda self, model=None: setattr(self, "model", "test") or setattr(self, "max_tokens", 10)), \
+            def fake_init(self, model=None):
+                self.model = "test"
+                self.fallback_model = None
+                self.max_tokens = 10
+
+            with patch.object(LLMService, "__init__", fake_init), \
                  patch.object(LLMService, "_post", new=fake_post):
                 svc = LLMService()
                 out = await svc.interpret_report({"extracted_text": "Hb 14"})
@@ -280,7 +324,12 @@ class TestRepairRetry:
             async def fake_post(self, endpoint, payload):
                 return {"choices": [{"message": {"content": "still not json"}}], "usage": {}}
 
-            with patch.object(LLMService, "__init__", lambda self, model=None: setattr(self, "model", "test") or setattr(self, "max_tokens", 10)), \
+            def fake_init(self, model=None):
+                self.model = "test"
+                self.fallback_model = None
+                self.max_tokens = 10
+
+            with patch.object(LLMService, "__init__", fake_init), \
                  patch.object(LLMService, "_post", new=fake_post):
                 svc = LLMService()
                 try:

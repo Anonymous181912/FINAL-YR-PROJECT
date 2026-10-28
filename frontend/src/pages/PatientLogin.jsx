@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Navigate, Link } from 'react-router-dom'
 import { useAuth } from '../auth.jsx'
+import { useFixedLightTheme } from '../utils/useFixedLightTheme.js'
 import {
   Sparkles,
   User,
@@ -50,6 +51,7 @@ export default function PatientLogin({ mode: initialMode = 'login' }) {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const { login } = useAuth()
+  useFixedLightTheme()
 
   if (typeof window !== 'undefined') {
     const token = localStorage.getItem('access_token')
@@ -107,16 +109,16 @@ export default function PatientLogin({ mode: initialMode = 'login' }) {
   const Icon = theme.icon
 
   return (
-    <div className="auth-page-container">
+    <div className="auth-page-container" data-portal="patient">
       {/* Left Feature Showcase Hero Pane */}
-      <div className="auth-hero-pane" style={{ background: `linear-gradient(135deg, var(--${theme.accent}), var(--${theme.accent.replace('500', '600')}))` }}>
+      <div className="auth-hero-pane">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div className="sidebar-logo-icon" style={{ width: 44, height: 44 }}>
             <Icon size={24} />
           </div>
           <div>
             <h2 style={{ color: 'white', fontSize: '1.25rem' }}>MediReport AI</h2>
-            <span style={{ color: 'var(--teal-200)', fontSize: '0.78rem', letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 600 }}>
+            <span style={{ color: '#ccfbf1', fontSize: '0.78rem', letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 600 }}>
               {theme.subtitle}
             </span>
           </div>
@@ -127,7 +129,7 @@ export default function PatientLogin({ mode: initialMode = 'login' }) {
             display: 'inline-flex',
             alignItems: 'center',
             gap: 6,
-            background: 'rgba(255, 255, 255, 0.15)',
+            background: 'rgba(0, 0, 0, 0.2)',
             border: '1px solid rgba(255, 255, 255, 0.3)',
             borderRadius: 'var(--radius-full)',
             padding: '4px 12px',
@@ -153,7 +155,7 @@ export default function PatientLogin({ mode: initialMode = 'login' }) {
             <div style={{ background: 'rgba(255, 255, 255, 0.04)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: 'var(--radius-md)', padding: 16 }}>
               <FileSearch size={22} color="white" style={{ marginBottom: 8 }} />
               <h4 style={{ color: 'white', fontSize: '0.95rem', marginBottom: 4 }}>Medical Reports</h4>
-              <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.82rem', lineHeight: 1.4 }}>
+              <p style={{ color: 'rgba(255,255,255,0.9)', fontSize: '0.82rem', lineHeight: 1.4 }}>
                 Upload and view lab reports with AI-powered interpretations.
               </p>
             </div>
@@ -161,7 +163,7 @@ export default function PatientLogin({ mode: initialMode = 'login' }) {
             <div style={{ background: 'rgba(255, 255, 255, 0.04)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: 'var(--radius-md)', padding: 16 }}>
               <Pill size={22} color="white" style={{ marginBottom: 8 }} />
               <h4 style={{ color: 'white', fontSize: '0.95rem', marginBottom: 4 }}>Digital Prescriptions</h4>
-              <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.82rem', lineHeight: 1.4 }}>
+              <p style={{ color: 'rgba(255,255,255,0.9)', fontSize: '0.82rem', lineHeight: 1.4 }}>
                 View issued prescriptions with PDF download and QR verification.
               </p>
             </div>
@@ -169,7 +171,7 @@ export default function PatientLogin({ mode: initialMode = 'login' }) {
             <div style={{ background: 'rgba(255, 255, 255, 0.04)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: 'var(--radius-md)', padding: 16 }}>
               <HeartPulse size={22} color="white" style={{ marginBottom: 8 }} />
               <h4 style={{ color: 'white', fontSize: '0.95rem', marginBottom: 4 }}>Health Timeline</h4>
-              <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.82rem', lineHeight: 1.4 }}>
+              <p style={{ color: 'rgba(255,255,255,0.9)', fontSize: '0.82rem', lineHeight: 1.4 }}>
                 Chronological view of all your medical events.
               </p>
             </div>
@@ -177,14 +179,14 @@ export default function PatientLogin({ mode: initialMode = 'login' }) {
             <div style={{ background: 'rgba(255, 255, 255, 0.04)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: 'var(--radius-md)', padding: 16 }}>
               <ShieldCheck size={22} color="white" style={{ marginBottom: 8 }} />
               <h4 style={{ color: 'white', fontSize: '0.95rem', marginBottom: 4 }}>Privacy Controls</h4>
-              <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.82rem', lineHeight: 1.4 }}>
+              <p style={{ color: 'rgba(255,255,255,0.9)', fontSize: '0.82rem', lineHeight: 1.4 }}>
                 Control which doctors can write prescriptions for you.
               </p>
             </div>
           </div>
         </div>
 
-        <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.78rem' }}>
+        <div style={{ color: 'rgba(255,255,255,0.9)', fontSize: '0.78rem' }}>
           Final Year Engineering Project &copy; {new Date().getFullYear()} &bull; FastAPI + React + MongoDB
         </div>
       </div>
@@ -207,7 +209,7 @@ export default function PatientLogin({ mode: initialMode = 'login' }) {
               border: '1px solid rgba(239, 68, 68, 0.3)',
               borderRadius: 'var(--radius-md)',
               padding: '12px 14px',
-              color: '#fca5a5',
+              color: '#b91c1c',
               fontSize: '0.86rem',
               marginBottom: 20
             }}>
@@ -221,7 +223,7 @@ export default function PatientLogin({ mode: initialMode = 'login' }) {
               border: '1px solid rgba(20, 184, 166, 0.3)',
               borderRadius: 'var(--radius-md)',
               padding: '12px 14px',
-              color: '#5eead4',
+              color: '#0f766e',
               fontSize: '0.86rem',
               marginBottom: 20
             }}>
@@ -306,7 +308,7 @@ export default function PatientLogin({ mode: initialMode = 'login' }) {
               )}
               {mode === 'login' && (
                 <p style={{ marginTop: 6, textAlign: 'right' }}>
-                  <a href="/forgot-password" style={{ fontSize: '0.78rem', color: 'var(--primary-600)' }}>
+                  <a href="/forgot-password" style={{ fontSize: '0.78rem', color: 'var(--teal-700)' }}>
                     Forgot password?
                   </a>
                 </p>
@@ -334,7 +336,7 @@ export default function PatientLogin({ mode: initialMode = 'login' }) {
             <button
               type="button"
               onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(''); setNotice('') }}
-              style={{ background: 'transparent', border: 'none', color: 'var(--primary-600)', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}
+              style={{ background: 'transparent', border: 'none', color: 'var(--teal-700)', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}
             >
               {mode === 'login' ? 'New here? Create an account' : 'Already have an account? Sign in'}
             </button>
@@ -347,7 +349,7 @@ export default function PatientLogin({ mode: initialMode = 'login' }) {
             textAlign: 'center'
           }}>
             <p style={{ color: 'var(--slate-500)', fontSize: '0.8rem', marginBottom: 8 }}>
-              <Link to="/doctor/login" style={{ color: 'var(--primary-600)', fontWeight: 600 }}>Doctor Portal</Link> &bull; 
+              <Link to="/doctor/login" style={{ color: 'var(--teal-700)', fontWeight: 600 }}>Doctor Portal</Link> &bull; 
               <a href="/admin/login" style={{ color: 'var(--slate-600)', fontWeight: 600 }}>Admin Login</a>
             </p>
           </div>

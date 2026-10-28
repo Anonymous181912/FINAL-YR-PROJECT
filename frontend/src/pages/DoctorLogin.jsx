@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Navigate, Link } from 'react-router-dom'
 import { useAuth } from '../auth.jsx'
+import { useFixedLightTheme } from '../utils/useFixedLightTheme.js'
 import {
   Sparkles,
   Mail,
@@ -52,6 +53,7 @@ export default function DoctorLogin({ mode: initialMode = 'login' }) {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const { login } = useAuth()
+  useFixedLightTheme()
 
   if (typeof window !== 'undefined') {
     const token = localStorage.getItem('access_token')
@@ -109,16 +111,16 @@ export default function DoctorLogin({ mode: initialMode = 'login' }) {
   const Icon = theme.icon
 
   return (
-    <div className="auth-page-container">
+    <div className="auth-page-container" data-portal="doctor">
       {/* Left Feature Showcase Hero Pane */}
-      <div className="auth-hero-pane" style={{ background: `linear-gradient(135deg, var(--${theme.accent}), var(--${theme.accent.replace('500', '600')}))` }}>
+      <div className="auth-hero-pane">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div className="sidebar-logo-icon" style={{ width: 44, height: 44 }}>
             <Icon size={24} />
           </div>
           <div>
             <h2 style={{ color: 'white', fontSize: '1.25rem' }}>MediReport AI</h2>
-            <span style={{ color: 'var(--primary-200)', fontSize: '0.78rem', letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 600 }}>
+            <span style={{ color: '#dbeafe', fontSize: '0.78rem', letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 600 }}>
               {theme.subtitle}
             </span>
           </div>
@@ -129,7 +131,7 @@ export default function DoctorLogin({ mode: initialMode = 'login' }) {
             display: 'inline-flex',
             alignItems: 'center',
             gap: 6,
-            background: 'rgba(255, 255, 255, 0.15)',
+            background: 'rgba(0, 0, 0, 0.2)',
             border: '1px solid rgba(255, 255, 255, 0.3)',
             borderRadius: 'var(--radius-full)',
             padding: '4px 12px',
@@ -155,7 +157,7 @@ export default function DoctorLogin({ mode: initialMode = 'login' }) {
             <div style={{ background: 'rgba(255, 255, 255, 0.04)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: 'var(--radius-md)', padding: 16 }}>
               <Users size={22} color="white" style={{ marginBottom: 8 }} />
               <h4 style={{ color: 'white', fontSize: '0.95rem', marginBottom: 4 }}>Patient Directory</h4>
-              <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.82rem', lineHeight: 1.4 }}>
+              <p style={{ color: 'rgba(255,255,255,0.9)', fontSize: '0.82rem', lineHeight: 1.4 }}>
                 Search and manage patients with access grants.
               </p>
             </div>
@@ -163,7 +165,7 @@ export default function DoctorLogin({ mode: initialMode = 'login' }) {
             <div style={{ background: 'rgba(255, 255, 255, 0.04)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: 'var(--radius-md)', padding: 16 }}>
               <Pill size={22} color="white" style={{ marginBottom: 8 }} />
               <h4 style={{ color: 'white', fontSize: '0.95rem', marginBottom: 4 }}>Write Prescriptions</h4>
-              <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.82rem', lineHeight: 1.4 }}>
+              <p style={{ color: 'rgba(255,255,255,0.9)', fontSize: '0.82rem', lineHeight: 1.4 }}>
                 Create digital Rx with safety checks & PDF export.
               </p>
             </div>
@@ -171,7 +173,7 @@ export default function DoctorLogin({ mode: initialMode = 'login' }) {
             <div style={{ background: 'rgba(255, 255, 255, 0.04)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: 'var(--radius-md)', padding: 16 }}>
               <FileSearch size={22} color="white" style={{ marginBottom: 8 }} />
               <h4 style={{ color: 'white', fontSize: '0.95rem', marginBottom: 4 }}>Review Reports</h4>
-              <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.82rem', lineHeight: 1.4 }}>
+              <p style={{ color: 'rgba(255,255,255,0.9)', fontSize: '0.82rem', lineHeight: 1.4 }}>
                 Access patient reports with AI interpretations.
               </p>
             </div>
@@ -179,14 +181,14 @@ export default function DoctorLogin({ mode: initialMode = 'login' }) {
             <div style={{ background: 'rgba(255, 255, 255, 0.04)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: 'var(--radius-md)', padding: 16 }}>
               <ShieldCheck size={22} color="white" style={{ marginBottom: 8 }} />
               <h4 style={{ color: 'white', fontSize: '0.95rem', marginBottom: 4 }}>Access Requests</h4>
-              <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.82rem', lineHeight: 1.4 }}>
+              <p style={{ color: 'rgba(255,255,255,0.9)', fontSize: '0.82rem', lineHeight: 1.4 }}>
                 Manage patient consent for data access.
               </p>
             </div>
           </div>
         </div>
 
-        <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.78rem' }}>
+        <div style={{ color: 'rgba(255,255,255,0.9)', fontSize: '0.78rem' }}>
           Final Year Engineering Project &copy; {new Date().getFullYear()} &bull; FastAPI + React + MongoDB
         </div>
       </div>
@@ -209,7 +211,7 @@ export default function DoctorLogin({ mode: initialMode = 'login' }) {
               border: '1px solid rgba(239, 68, 68, 0.3)',
               borderRadius: 'var(--radius-md)',
               padding: '12px 14px',
-              color: '#fca5a5',
+              color: '#b91c1c',
               fontSize: '0.86rem',
               marginBottom: 20
             }}>
@@ -223,7 +225,7 @@ export default function DoctorLogin({ mode: initialMode = 'login' }) {
               border: '1px solid rgba(14, 165, 233, 0.3)',
               borderRadius: 'var(--radius-md)',
               padding: '12px 14px',
-              color: '#7dd3fc',
+              color: '#0369a1',
               fontSize: '0.86rem',
               marginBottom: 20
             }}>
@@ -308,7 +310,7 @@ export default function DoctorLogin({ mode: initialMode = 'login' }) {
               )}
               {mode === 'login' && (
                 <p style={{ marginTop: 6, textAlign: 'right' }}>
-                  <a href="/forgot-password" style={{ fontSize: '0.78rem', color: 'var(--primary-600)' }}>
+                  <a href="/forgot-password" style={{ fontSize: '0.78rem', color: 'var(--primary-700)' }}>
                     Forgot password?
                   </a>
                 </p>
@@ -356,7 +358,7 @@ export default function DoctorLogin({ mode: initialMode = 'login' }) {
             <button
               type="button"
               onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(''); setNotice('') }}
-              style={{ background: 'transparent', border: 'none', color: 'var(--primary-600)', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}
+              style={{ background: 'transparent', border: 'none', color: 'var(--primary-700)', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}
             >
               {mode === 'login' ? 'New here? Create an account' : 'Already have an account? Sign in'}
             </button>
@@ -369,7 +371,7 @@ export default function DoctorLogin({ mode: initialMode = 'login' }) {
             textAlign: 'center'
           }}>
             <p style={{ color: 'var(--slate-500)', fontSize: '0.8rem', marginBottom: 8 }}>
-              <Link to="/patient/login" style={{ color: 'var(--teal-600)', fontWeight: 600 }}>Patient Portal</Link> &bull; 
+              <Link to="/patient/login" style={{ color: 'var(--teal-700)', fontWeight: 600 }}>Patient Portal</Link> &bull; 
               <a href="/admin/login" style={{ color: 'var(--slate-600)', fontWeight: 600 }}>Admin Login</a>
             </p>
           </div>

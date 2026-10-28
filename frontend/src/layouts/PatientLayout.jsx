@@ -19,7 +19,6 @@ import {
   Bell,
   Sun,
   Moon,
-  Laptop,
   Search,
   ChevronLeft,
   ChevronRight,
@@ -152,10 +151,8 @@ export function ThemeToggle({ theme, onThemeChange }) {
         >
           {theme === 'dark' ? (
             <Moon className="w-5 h-5 text-teal-500" />
-          ) : theme === 'light' ? (
-            <Sun className="w-5 h-5 text-teal-500" />
           ) : (
-            <Laptop className="w-5 h-5" />
+            <Sun className="w-5 h-5 text-teal-500" />
           )}
         </button>
       </DropdownMenuTrigger>
@@ -168,10 +165,7 @@ export function ThemeToggle({ theme, onThemeChange }) {
           <Moon className="w-4 h-4 mr-2" />
           <span>Dark</span>
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onThemeChange('system')}>
-          <Laptop className="w-4 h-4 mr-2" />
-          <span>System</span>
-        </DropdownMenuItem>
+
       </DropdownMenuContent>
     </DropdownMenu>
   )
@@ -186,36 +180,26 @@ export default function PatientLayout() {
   const [mobileDrawerOpen, setMobileDrawerOpen] = React.useState(false)
   const [searchOpen, setSearchOpen] = React.useState(false)
 
-  // 3-state Theme: system | light | dark
+  // Theme: light | dark. OS preference is deliberately ignored so each portal
+  // keeps a fixed, deliberate appearance; the toggle is an explicit user choice.
   const [themePreference, setThemePreference] = React.useState(() => {
     try {
-      return localStorage.getItem('theme_pref') || 'system'
+      return localStorage.getItem('theme_pref') === 'dark' ? 'dark' : 'light'
     } catch {
-      return 'system'
+      return 'light'
     }
   })
 
   // Synchronize actual theme class/attribute on html root
   React.useEffect(() => {
     const root = document.documentElement
-    const applyTheme = (isDark) => {
-      if (isDark) {
-        root.setAttribute('data-theme', 'dark')
-        root.classList.add('dark')
-      } else {
-        root.setAttribute('data-theme', 'light')
-        root.classList.remove('dark')
-      }
-    }
-
-    if (themePreference === 'system') {
-      const media = window.matchMedia('(prefers-color-scheme: dark)')
-      applyTheme(media.matches)
-      const listener = (e) => applyTheme(e.matches)
-      media.addEventListener('change', listener)
-      return () => media.removeEventListener('change', listener)
+    const isDark = themePreference === 'dark'
+    if (isDark) {
+      root.setAttribute('data-theme', 'dark')
+      root.classList.add('dark')
     } else {
-      applyTheme(themePreference === 'dark')
+      root.setAttribute('data-theme', 'light')
+      root.classList.remove('dark')
     }
 
     try {
@@ -250,6 +234,7 @@ export default function PatientLayout() {
     { to: '/patient/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { to: '/patient/reports', label: 'My Reports', icon: FileText },
     { to: '/patient/reports?upload=1', label: 'Upload Report', icon: UploadCloud },
+    { to: '/patient/trends', label: 'Health Trends', icon: Activity },
     { to: '/patient/prescriptions', label: 'My Prescriptions', icon: Pill },
     { to: '/patient/history', label: 'Health Timeline', icon: Clock },
     { to: '/patient/access', label: 'Access & Privacy', icon: ShieldCheck },
@@ -261,6 +246,7 @@ export default function PatientLayout() {
     const path = location.pathname
     if (path.startsWith('/patient/reports/')) return 'Report Details'
     if (path === '/patient/reports') return 'My Reports'
+    if (path.startsWith('/patient/trends')) return 'Health Trends'
     if (path === '/patient/prescriptions') return 'My Prescriptions'
     if (path === '/patient/history') return 'Health Timeline'
     if (path === '/patient/access') return 'Access & Privacy'
@@ -300,7 +286,7 @@ export default function PatientLayout() {
         className={`fixed md:sticky top-0 h-screen z-50 flex flex-col bg-teal-900 text-teal-50 border-r border-teal-800 transition-all duration-300 ease-in-out ${
           collapsed ? 'w-[72px]' : 'w-[264px]'
         } ${mobileDrawerOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}
-        style={{ background: 'linear-gradient(180deg, #0f766e 0%, #0d9488 100%)' }}
+        style={{ background: 'linear-gradient(180deg, #115e59 0%, #134e4a 100%)' }}
       >
         {/* Brand Header */}
         <div className="h-16 flex items-center justify-between px-4 border-b border-teal-800/80 shrink-0">
@@ -451,7 +437,7 @@ export default function PatientLayout() {
             {/* Notification Bell */}
             <NotificationBell />
 
-            {/* Theme Toggle (System / Light / Dark) */}
+            {/* Theme Toggle (Light / Dark) */}
             <ThemeToggle
               theme={themePreference}
               onThemeChange={setThemePreference}

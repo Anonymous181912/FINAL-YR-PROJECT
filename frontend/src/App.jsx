@@ -12,6 +12,7 @@ import DoctorReports from './pages/DoctorReports.jsx'
 import PatientPrescriptions from './pages/PatientPrescriptions.jsx'
 import DoctorPrescriptions from './pages/DoctorPrescriptions.jsx'
 import PatientHistory from './pages/PatientHistory.jsx'
+import HealthTrends from './pages/HealthTrends.jsx'
 import DoctorPatients from './pages/DoctorPatients.jsx'
 import PatientProfile from './pages/PatientProfile.jsx'
 import DoctorProfile from './pages/DoctorProfile.jsx'
@@ -153,6 +154,8 @@ function AppRoutes() {
         <Route path="dashboard" element={<PatientDashboard />} />
         <Route path="reports" element={<PatientReports />} />
         <Route path="reports/:id" element={<PatientReports />} />
+        <Route path="trends" element={<HealthTrends />} />
+        <Route path="trends/:canonicalTest" element={<HealthTrends />} />
         <Route path="prescriptions" element={<PatientPrescriptions />} />
         <Route path="history" element={<PatientHistory />} />
         <Route path="profile" element={<PatientProfile />} />
@@ -194,6 +197,8 @@ function AppRoutes() {
             <Route path="prescriptions" element={<DoctorPrescriptions />} />
             <Route path="reports" element={<DoctorReports />} />
             <Route path="reports/:id" element={<DoctorReports />} />
+            <Route path="trends/:patientId" element={<HealthTrends />} />
+            <Route path="trends/:patientId/:canonicalTest" element={<HealthTrends />} />
             <Route path="history" element={<DoctorHistory />} />
             <Route path="access" element={<DoctorAccess />} />
             <Route path="profile" element={<DoctorProfile />} />

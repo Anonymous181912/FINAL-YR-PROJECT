@@ -15,7 +15,12 @@ class Settings(BaseSettings):
     omni_route_base_url: str = Field(default="https://api.groq.com/openai/v1", validation_alias=AliasChoices("OMNIROUTE_BASE_URL", "OMNI_ROUTE_BASE_URL"))
     omni_route_model: str = Field(default="qwen/qwen3.8-27b", validation_alias=AliasChoices("OMNIROUTE_MODEL", "OMNI_ROUTE_MODEL"))
     omni_route_timeout: int = Field(default=60, validation_alias=AliasChoices("OMNIROUTE_TIMEOUT", "OMNI_ROUTE_TIMEOUT"))
+    # Legacy provider cap, kept for backwards compatibility. LLM_MAX_OUTPUT_TOKENS
+    # is the value used by the client because some providers reject 2048 OTPM.
     omni_route_max_tokens: int = Field(default=2048, validation_alias=AliasChoices("OMNIROUTE_MAX_TOKENS", "OMNI_ROUTE_MAX_TOKENS"))
+    llm_model: str = Field(default="", validation_alias=AliasChoices("LLM_MODEL"))
+    llm_fallback_model: str = Field(default="", validation_alias=AliasChoices("LLM_FALLBACK_MODEL"))
+    llm_max_output_tokens: int = Field(default=800, validation_alias=AliasChoices("LLM_MAX_OUTPUT_TOKENS"))
 
     mongodb_url: str = "mongodb://localhost:27017"
     mongodb_db_name: str = "healthcare_system"
@@ -59,6 +64,9 @@ class Settings(BaseSettings):
     llm_model_interpret: str = ""
     llm_model_chat: str = ""
     sync_upload: bool = True
+
+    # Longitudinal trends: |change_pct| below this is "stable".
+    trend_stable_threshold_pct: float = 5.0
 
     @property
     def cors_origins_list(self) -> List[str]:

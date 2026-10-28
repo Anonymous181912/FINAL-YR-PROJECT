@@ -29,6 +29,9 @@ services:
       OMNIROUTE_API_KEY: ${OMNIROUTE_API_KEY:-}
       OMNIROUTE_BASE_URL: ${OMNIROUTE_BASE_URL:-https://api.omni-route.com/v1}
       OMNIROUTE_MODEL: ${OMNIROUTE_MODEL:-qwen2.5-7b-instruct}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_FALLBACK_MODEL: ${LLM_FALLBACK_MODEL:-}
+      LLM_MAX_OUTPUT_TOKENS: ${LLM_MAX_OUTPUT_TOKENS:-800}
       CORS_ORIGINS: http://localhost:8080
       # Seed the first admin on first boot (see backend/scripts/seed_admin.py).
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}

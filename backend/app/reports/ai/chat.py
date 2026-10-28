@@ -150,15 +150,10 @@ async def answer_question(
         f"REPORT EXCERPTS:\n{context}\n\nQUESTION: {question}\n\nAnswer briefly, only from the excerpts.",
     )
     try:
-        data = await service._post("chat/completions", {
-            "model": service.model, "messages": messages,
-            "max_tokens": 512, "temperature": 0.2,
+        data = await service._chat_completion({
+            "messages": messages,
+            "max_tokens": service.max_tokens, "temperature": 0.2,
         })
-        try:
-            usage = data.get("usage") or {}
-            logger.info("LLM chat usage: model=%s total=%s", service.model, usage.get("total_tokens"))
-        except Exception:
-            pass
         answer = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
         if not answer:
             answer = _ABSENT

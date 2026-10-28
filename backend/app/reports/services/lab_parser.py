@@ -8,19 +8,30 @@ optionally the patient's gender/age), returns a list of lab results::
 
 Rules:
 - The report's own printed reference range ALWAYS wins (``range_source``
-  ``"report"``) and the raw value is compared directly against it.
+  ``"report"``). When the unit is known, both the value and the printed
+  bounds are converted to the test's standard unit.
 - Otherwise the reference table is used with the patient's gender when a
-  sex-specific range exists (``range_source`` ``"table"``); when gender is
-  unknown (or no sex split exists and we fall back to the general adult
-  interval) ``range_source`` is ``"default_adult"``.
+  sex-specific range exists (``range_source`` ``"table"``).
 - Reported values are converted to the test's standard unit before table
   comparison. If the unit is missing, unknown, or not valid for that test,
   the result is still returned but with ``flag`` ``"unknown"`` (never guess).
+- ``original_value`` / ``original_unit`` retain the printed measurement so an
+  original result can always be audited after conversion or patient edits.
+- A test is only stored when its numeric result actually appears in the text.
+
+Layouts supported:
+1. A test name and its value on one line (classic text/PDF reports).
+2. Stacked/columnar OCR output where the test name, result, reference range
+   and unit are on separate consecutive lines. This is common when a table
+   is OCR'd column-by-column.
+3. Pipe-separated rows (``Hemoglobin | 15.2 | g/dL | 13.5 - 17.5``); pipes
+   are treated as line separators for parsing.
 """
 
 from __future__ import annotations
 
 import re
+from datetime import date
 from typing import Optional
 
 from app.reports.services.reference_ranges import (
@@ -33,11 +44,26 @@ from app.reports.services.reference_ranges import (
     convert_hba1c_ifcc_to_percent,
 )
 
-# value like 11.2 / 11,200 / 0.9 — commas allowed as thousand separators.
-_VALUE_RE = r"(?P<value>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)"
-# printed range: (13.0 - 17.0), (13.0-17.0), (13.0 to 17.0) with en/em dashes.
+# A numeric token: 11.2 / 11,200 / 0.9 (commas allowed as thousand separators).
+_NUM = r"(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)"
+_VALUE_RE = r"(?P<value>" + _NUM + r")"
+_NUMBER_TOKEN_RE = re.compile(_NUM)
+# Printed range: (13.0 - 17.0), 13.0-17.0, 13.0 to 17.0, 13- 17,
+# plus one-sided <200 / <=200 / >5 / >=5. Parentheses are optional because
+# OCR often drops them.
 _RANGE_RE = re.compile(
-    r"\(\s*(?P<low>\d+(?:\.\d+)?)\s*(?:[-–—]|to)\s*(?P<high>\d+(?:\.\d+)?)\s*[^)]*\)"
+    r"\(\s*(?P<low_paren>" + _NUM + r")"
+    r"\s*(?:[-–—]|to)\s*"
+    r"(?P<high_paren>" + _NUM + r")\s*[^)]*\)"
+    r"|"
+    r"(?P<lt_sym><=|<)\s*(?P<lt_val>" + _NUM + r")"
+    r"|"
+    r"(?P<gt_sym>>=|>)\s*(?P<gt_val>" + _NUM + r")"
+    r"|"
+    r"(?P<low_bare>" + _NUM + r")"
+    r"\s*(?:[-–—]|to)\s*"
+    r"(?P<high_bare>" + _NUM + r")",
+    re.IGNORECASE,
 )
 # separator between test name and value: colon, dash, or whitespace.
 _SEP_RE = r"\s*[:\-–—]?\s*"
@@ -54,19 +80,148 @@ _NAME_RE = re.compile(
 _SORTED_UNIT_ALIASES = sorted(UNIT_ALIASES.keys(), key=len, reverse=True)
 
 # Raw-count divisor per test for "count_raw" family (plain cell counts).
-_COUNT_RAW_DIVISOR = {"wbc": 1_000.0, "platelets": 1_000.0, "rbc": 1_000_000.0}
+_COUNT_RAW_DIVISOR = {
+    "wbc": 1_000.0,
+    "platelets": 1_000.0,
+    "rbc": 1_000_000.0,
+    "absolute_neutrophils": 1_000.0,
+    "absolute_lymphocytes": 1_000.0,
+    "absolute_eosinophils": 1_000.0,
+    "absolute_monocytes": 1_000.0,
+    "absolute_basophils": 1_000.0,
+}
 
 # Heuristic: a "count_raw" value below this is already in standard units
 # (e.g. "WBC 7.5 /uL" written loosely); at/above it we treat it as a raw
-# count and divide. Values are never exactly in this grey zone in practice.
+# count and divide. Absolute counts have much smaller standard values, so
+# they use a lower threshold (50 /cumm is a raw count, 0.05 is standard).
 _COUNT_RAW_THRESHOLD = 100.0
+_COUNT_RAW_THRESHOLD_BY_TEST = {
+    "absolute_neutrophils": 10.0,
+    "absolute_lymphocytes": 10.0,
+    "absolute_eosinophils": 10.0,
+    "absolute_monocytes": 10.0,
+    "absolute_basophils": 10.0,
+}
+
+# OCR often loses the slash or capitalisation in common units.
+_UNIT_DISPLAY = {
+    "icumm": "/cumm",
+    "cumm": "/cumm",
+    "cmm": "/cmm",
+    "gldl": "g/dL",
+    "fl": "fL",
+    "pg": "pg",
+}
+
+# OCR sometimes splits a row label onto two lines: "Absolute" /
+# "Lymphocytes". Rejoin those as absolute counts, not percentages.
+_ABSOLUTE_PERCENT_MAP = {
+    "neutrophil_percent": "absolute_neutrophils",
+    "lymphocyte_percent": "absolute_lymphocytes",
+    "eosinophil_percent": "absolute_eosinophils",
+    "monocyte_percent": "absolute_monocytes",
+    "basophil_percent": "absolute_basophils",
+}
+
+# Characters OCR commonly confuses inside numbers. Only tokens that already
+# contain at least one digit are repaired, so words are never rewritten.
+_NUMERIC_OCR_MAP = str.maketrans({"O": "0", "o": "0", "I": "1", "l": "1", "|": "1"})
+
+
+def _fix_numeric_tokens(line: str) -> str:
+    def _repair(match: re.Match) -> str:
+        token = match.group(0)
+        if not any(ch.isdigit() for ch in token):
+            return token
+        return token.translate(_NUMERIC_OCR_MAP)
+
+    return re.sub(
+        r"(?<![\w])(?=[0-9OoIl|.,]*[0-9])([0-9OoIl|.,]+)(?![\w])",
+        _repair,
+        line,
+    )
+
+
+def _normalize_ocr_parts(raw_line: str) -> list[str]:
+    """Turn one stored line into clean parseable parts.
+
+    Handles literal ``\\n`` / ``|n`` noise, pipe-separated table rows, tabs and
+    numeric OCR confusions. The original line is kept separately by callers
+    for ``source_text`` so this never rewrites the stored report text.
+    """
+    line = raw_line.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\r", "\n")
+    # "|n" is a very common OCR rendering of a newline.
+    line = re.sub(r"\|\s*n", "\n", line, flags=re.IGNORECASE)
+    line = line.replace("|", "\n")
+
+    parts: list[str] = []
+    for part in line.split("\n"):
+        fixed = _fix_numeric_tokens(part)
+        collapsed = re.sub(r"[ \t\u00a0]+", " ", fixed).strip()
+        if collapsed:
+            parts.append(collapsed)
+    return parts
+
+
+def _line_entries(text: str) -> list[dict]:
+    """Split text into parseable line entries with original source spans."""
+    normalised = text.replace("\r\n", "\n").replace("\r", "\n")
+    entries: list[dict] = []
+    position = 0
+    for raw_line in normalised.split("\n"):
+        raw_start = position
+        position += len(raw_line) + 1
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        content_start = raw_start + (len(raw_line) - len(raw_line.lstrip()))
+        end = raw_start + len(raw_line)
+        for part in _normalize_ocr_parts(raw_line):
+            entries.append(
+                {
+                    "text": part,
+                    "source": stripped,
+                    "start": content_start,
+                    "end": end,
+                }
+            )
+    return entries
+
+
+def _range_values(match: re.Match) -> Optional[tuple[Optional[float], Optional[float]]]:
+    if match.group("lt_val") is not None:
+        return (None, _to_float(match.group("lt_val")))
+    if match.group("gt_val") is not None:
+        return (_to_float(match.group("gt_val")), None)
+    low = match.group("low_paren") or match.group("low_bare")
+    high = match.group("high_paren") or match.group("high_bare")
+    if low is None or high is None:
+        return None
+    low_value = _to_float(low)
+    high_value = _to_float(high)
+    if low_value is None or high_value is None:
+        return None
+    return (low_value, high_value)
+
+
+def _to_float(raw: str) -> Optional[float]:
+    try:
+        return float(raw.replace(",", ""))
+    except (TypeError, ValueError):
+        return None
 
 
 def normalize_unit(raw: str) -> str:
-    """Lowercase, remove spaces/dots, unify micro signs."""
+    """Lowercase, remove spaces/dots/brackets, unify micro signs."""
     u = raw.strip().lower().replace(" ", "").replace(".", "")
     u = u.replace("µ", "u").replace("μ", "u").replace("³", "3")
-    return u
+    return u.strip("():,;")
+
+
+def _display_unit(raw: str) -> str:
+    norm = normalize_unit(raw)
+    return _UNIT_DISPLAY.get(norm, raw.strip())
 
 
 def lookup_unit(canonical: str, raw_unit: str) -> Optional[tuple[str, float]]:
@@ -99,10 +254,38 @@ def lookup_unit(canonical: str, raw_unit: str) -> Optional[tuple[str, float]]:
 def _convert_to_standard(canonical: str, value: float, family: str, factor: float) -> float:
     if family == "count_raw":
         divisor = _COUNT_RAW_DIVISOR.get(canonical, 1.0)
-        if value >= _COUNT_RAW_THRESHOLD:
+        threshold = _COUNT_RAW_THRESHOLD_BY_TEST.get(canonical, _COUNT_RAW_THRESHOLD)
+        if value >= threshold:
             return value / divisor
         return value
     return value * factor
+
+
+def _standard_measurement(
+    canonical: str, value: float, family: str, factor: float
+) -> tuple[float, str]:
+    """Convert one source measurement to the canonical standard unit."""
+    if family == "hba1c_ifcc":
+        return (round(convert_hba1c_ifcc_to_percent(value), 3), "%")
+    return (
+        round(_convert_to_standard(canonical, value, family, factor), 3),
+        REFERENCE_RANGES[canonical]["standard_unit"],
+    )
+
+
+def convert_measurement_to_standard(
+    canonical: str, value: float, raw_unit: str
+) -> Optional[tuple[float, str]]:
+    """Public unit conversion helper -> ``(value, standard_unit)`` or ``None``.
+
+    Use this for values stored before the trend data model existed, where the
+    printed unit/range were kept raw.
+    """
+    resolved = lookup_unit(canonical, raw_unit)
+    if resolved is None:
+        return None
+    family, factor = resolved
+    return _standard_measurement(canonical, value, family, factor)
 
 
 def _table_range(canonical: str, gender: Optional[str]) -> tuple[float, float, str]:
@@ -112,17 +295,13 @@ def _table_range(canonical: str, gender: Optional[str]) -> tuple[float, float, s
         low, high = ranges[g]
         return low, high, "table"
     low, high = ranges["adult"]
-    # "table" only when the table itself has no sex split (the adult interval
-    # IS the table entry); otherwise we fell back -> "default_adult".
-    if "male" in ranges or "female" in ranges:
-        return low, high, "default_adult"
     return low, high, "table"
 
 
-def _flag(value: float, low: float, high: float) -> str:
-    if value < low:
+def _flag(value: float, low: Optional[float], high: Optional[float]) -> str:
+    if low is not None and value < low:
         return "low"
-    if value > high:
+    if high is not None and value > high:
         return "high"
     return "normal"
 
@@ -150,6 +329,463 @@ def _extract_unit_text(after_value: str) -> str:
     return unit
 
 
+def _build_result(
+    canonical: str,
+    value: float,
+    unit_raw: str,
+    printed: Optional[tuple[Optional[float], Optional[float]]],
+    start: int,
+    end: int,
+    source_text: str,
+    gender: Optional[str],
+    original_name: Optional[str] = None,
+) -> dict:
+    """Apply the printed-range-first / table-conversion rules to one value."""
+    display_name = REFERENCE_RANGES[canonical]["display_name"]
+    unit = _display_unit(unit_raw) if unit_raw else ""
+    base = {
+        "name": display_name,
+        "original_name": (original_name or display_name).strip(),
+        "canonical_name": canonical,
+        "original_value": value,
+        "original_unit": unit,
+        "source_text": source_text,
+        "start": start,
+        "end": end,
+    }
+    resolved = lookup_unit(canonical, unit_raw) if unit_raw else None
+
+    if printed is not None:
+        ref_low, ref_high = printed
+        if resolved is not None:
+            family, factor = resolved
+            std_value, std_unit = _standard_measurement(canonical, value, family, factor)
+            std_low = (
+                _standard_measurement(canonical, ref_low, family, factor)[0]
+                if ref_low is not None
+                else None
+            )
+            std_high = (
+                _standard_measurement(canonical, ref_high, family, factor)[0]
+                if ref_high is not None
+                else None
+            )
+            return {
+                **base,
+                "value": std_value,
+                "unit": std_unit,
+                "ref_low": std_low,
+                "ref_high": std_high,
+                "flag": _flag(std_value, std_low, std_high),
+                "range_source": "report",
+            }
+        # Unknown/missing unit: keep the printed measurement untouched. It is
+        # still flaggable against its own printed range, but trend analysis
+        # will list it as not comparable because the unit is unresolved.
+        return {
+            **base,
+            "value": value,
+            "unit": unit,
+            "ref_low": ref_low,
+            "ref_high": ref_high,
+            "flag": _flag(value, ref_low, ref_high),
+            "range_source": "report",
+        }
+
+    table_low, table_high, source = _table_range(canonical, gender)
+    if not unit_raw:
+        # Missing unit and no printed range: show table range but do
+        # not flag (unit cannot be verified).
+        return {
+            **base,
+            "value": value,
+            "unit": "",
+            "ref_low": table_low,
+            "ref_high": table_high,
+            "flag": "unknown",
+            "range_source": source,
+        }
+
+    if resolved is None:
+        return {
+            **base,
+            "value": value,
+            "unit": unit,
+            "ref_low": table_low,
+            "ref_high": table_high,
+            "flag": "unknown",
+            "range_source": source,
+        }
+
+    family, factor = resolved
+    std_value, std_unit = _standard_measurement(canonical, value, family, factor)
+    return {
+        **base,
+        "value": std_value,
+        "unit": std_unit,
+        "ref_low": table_low,
+        "ref_high": table_high,
+        "flag": _flag(std_value, table_low, table_high),
+        "range_source": source,
+    }
+
+
+def _parse_inline_lines(entries: list[dict], gender: Optional[str]) -> list[dict]:
+    """Classic layout: test name and result on the same line."""
+    results: list[dict] = []
+    for entry in entries:
+        stripped = entry["text"]
+        if not stripped:
+            continue
+
+        # Printed ranges on this line (usually one).
+        range_match = _RANGE_RE.search(stripped)
+        printed = _range_values(range_match) if range_match else None
+
+        # Remove range text so range numbers can't be parsed as values.
+        clean = _RANGE_RE.sub(" ", stripped)
+        # Hyphenated names ("LDL-Cholesterol") -> spaced so multi-word
+        # synonyms match; digit-hyphen cases ("25-OH") are left alone.
+        clean = re.sub(r"(?<=[A-Za-z])-(?=[A-Za-z])", " ", clean)
+
+        line_seen: set[str] = set()
+        for name_match in _NAME_RE.finditer(clean):
+            synonym = name_match.group("name")
+            canonical = SYNONYM_TO_CANONICAL[synonym.lower()]
+            # Avoid double-counting the same test on one line (e.g. "HbA1c ...
+            # glycosylated hemoglobin ..." would match twice).
+            if canonical in line_seen:
+                continue
+            rest = clean[name_match.end():]
+            sep = re.match(_SEP_RE, rest)
+            rest_after_sep = rest[sep.end():] if sep else rest
+            val_match = re.match(_VALUE_RE, rest_after_sep)
+            if not val_match:
+                continue
+            value = _to_float(val_match.group("value"))
+            if value is None:
+                continue
+            after_value = rest_after_sep[val_match.end():]
+            unit_raw = _extract_unit_text(after_value)
+
+            line_seen.add(canonical)
+            results.append(
+                _build_result(
+                    canonical,
+                    value,
+                    unit_raw,
+                    printed,
+                    entry["start"],
+                    entry["end"],
+                    entry["source"],
+                    gender,
+                    original_name=synonym,
+                )
+            )
+
+    return results
+
+
+def _next_known_name(line: str) -> bool:
+    """True when a line starts with a known test name (stacked-table boundary)."""
+    return _NAME_RE.match(line.strip()) is not None
+
+
+def _source_span(entries: list[dict], first: int, last: int) -> str:
+    sources: list[str] = []
+    for entry in entries[first:last + 1]:
+        if not sources or sources[-1] != entry["source"]:
+            sources.append(entry["source"])
+    return "\n".join(sources)
+
+
+def _parse_stacked_blocks(
+    entries: list[dict], gender: Optional[str], seen: set[str]
+) -> list[dict]:
+    """Columnar OCR layout: name, result, range and unit on separate lines."""
+    results: list[dict] = []
+    consumed: set[int] = set()
+    for line_index, entry in enumerate(entries):
+        if line_index in consumed:
+            continue
+        stripped = entry["text"]
+        if not stripped:
+            continue
+
+        header_index = line_index
+        name_match = _NAME_RE.match(stripped)
+        if not name_match and stripped.lower() == "absolute":
+            # OCR may split "Absolute Lymphocytes" into "Absolute" on one
+            # line and "Lymphocytes" on the next. Rejoin them so the result
+            # is not mistaken for the differential percentage.
+            for lookahead in range(line_index + 1, len(entries)):
+                candidate = entries[lookahead]["text"]
+                if not candidate:
+                    continue
+                candidate_match = _NAME_RE.match(candidate)
+                if not candidate_match:
+                    break
+                candidate_canonical = SYNONYM_TO_CANONICAL[
+                    candidate_match.group("name").lower()
+                ]
+                absolute_canonical = _ABSOLUTE_PERCENT_MAP.get(candidate_canonical)
+                if not absolute_canonical:
+                    break
+                header_index = lookahead
+                consumed.add(lookahead)
+                name_match = candidate_match
+                canonical = absolute_canonical
+                break
+            if not name_match:
+                continue
+        else:
+            if not name_match:
+                continue
+            canonical = SYNONYM_TO_CANONICAL[name_match.group("name").lower()]
+
+        if canonical in seen:
+            continue
+
+        header_entry = entries[header_index]
+        rest = header_entry["text"][name_match.end():]
+        sep = re.match(_SEP_RE, rest)
+        after_name = rest[sep.end():] if sep else rest
+        # Inline layout is handled by _parse_inline_lines, including lines
+        # that only contain a reference range after the name.
+        if re.match(_VALUE_RE, after_name):
+            continue
+
+        numbers: list[float] = []
+        printed: Optional[tuple[Optional[float], Optional[float]]] = None
+        unit_raw = ""
+        last_index = header_index
+
+        for next_index in range(header_index + 1, len(entries)):
+            nxt = entries[next_index]["text"]
+            if not nxt:
+                continue
+            if _next_known_name(nxt):
+                break
+
+            range_match = _RANGE_RE.search(nxt)
+            if range_match:
+                values = _range_values(range_match)
+                if printed is None and values is not None:
+                    printed = values
+                last_index = next_index
+                continue
+
+            # Check units before numbers because some units contain digits
+            # (e.g. "x10^3/uL"). Continue scanning so a range printed AFTER
+            # the unit (name / value / unit / range) is still picked up.
+            if lookup_unit(canonical, nxt) is not None:
+                if not unit_raw:
+                    unit_raw = nxt
+                last_index = next_index
+                continue
+
+            if re.search(r"\d\s*[-–—]\s*\d", nxt):
+                # Range-like but unparseable (OCR noise such as "14.,0").
+                # Never treat those digits as a result value.
+                last_index = next_index
+                continue
+
+            numeric_tokens = _NUMBER_TOKEN_RE.findall(nxt)
+            if numeric_tokens:
+                numbers.extend(
+                    value
+                    for value in (_to_float(tok) for tok in numeric_tokens)
+                    if value is not None
+                )
+                last_index = next_index
+                continue
+
+            # Unknown uppercase labels (e.g. PCT, MPV, PDW) end this block.
+            if numbers and re.fullmatch(r"[A-Z][A-Z0-9+\-]{1,7}:?", nxt):
+                break
+
+        if not numbers:
+            continue
+
+        value = numbers[0]
+        # OCR sometimes splits "4000 - 10000" into three separate lines:
+        # result, low, high. Only infer with exactly three numbers.
+        if printed is None and len(numbers) >= 3:
+            inferred = (numbers[1], numbers[2])
+            if 0 <= inferred[0] < inferred[1]:
+                printed = inferred
+
+        start = entries[line_index]["start"]
+        end = entries[last_index]["end"]
+        source_text = _source_span(entries, line_index, last_index)
+        results.append(
+            _build_result(
+                canonical,
+                value,
+                unit_raw,
+                printed,
+                start,
+                end,
+                source_text,
+                gender,
+                original_name=name_match.group("name"),
+            )
+        )
+        seen.add(canonical)
+
+    return results
+
+
+# ---- Collection / report date ------------------------------------------------
+
+_DATE_RE = re.compile(
+    r"\b(?P<dmy1>\d{1,2})[/.-](?P<dmy2>\d{1,2})[/.-](?P<dmy3>\d{2,4})\b"
+    r"|"
+    r"\b(?P<iso_year>\d{4})-(?P<iso_month>\d{1,2})-(?P<iso_day>\d{1,2})\b"
+)
+
+_MONTHS = {
+    "jan": 1, "january": 1,
+    "feb": 2, "february": 2,
+    "mar": 3, "march": 3,
+    "apr": 4, "april": 4,
+    "may": 5,
+    "jun": 6, "june": 6,
+    "jul": 7, "july": 7,
+    "aug": 8, "august": 8,
+    "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10,
+    "nov": 11, "november": 11,
+    "dec": 12, "december": 12,
+}
+_MONTH_DATE_RE = re.compile(
+    r"\b(?P<day>\d{1,2})[\s./-]+(?P<month>[A-Za-z]{3,9})[\s,./-]+(?P<year>\d{2,4})\b"
+    r"|"
+    r"\b(?P<month2>[A-Za-z]{3,9})[\s./-]+(?P<day2>\d{1,2})[\s,./-]+(?P<year2>\d{2,4})\b",
+    re.IGNORECASE,
+)
+
+
+def _coerce_date(first: int, second: int, year: int) -> Optional[str]:
+    if year < 100:
+        year += 2000 if year < 70 else 1900
+    candidates: list[tuple[int, int]] = []
+    if first > 12:
+        candidates.append((second, first))  # day-first (dd/mm/yyyy)
+    elif second > 12:
+        candidates.append((first, second))  # month-first (mm/dd/yyyy)
+    else:
+        candidates.append((second, first))  # default: day-first
+        candidates.append((first, second))
+    for month, day in candidates:
+        try:
+            return date(year, month, day).isoformat()
+        except ValueError:
+            continue
+    return None
+
+
+def _date_in_text(text: str) -> Optional[str]:
+    match = _DATE_RE.search(text or "")
+    if match:
+        if match.group("iso_year"):
+            return _coerce_date(
+                int(match.group("iso_day")),
+                int(match.group("iso_month")),
+                int(match.group("iso_year")),
+            )
+        return _coerce_date(
+            int(match.group("dmy1")),
+            int(match.group("dmy2")),
+            int(match.group("dmy3")),
+        )
+
+    month_match = _MONTH_DATE_RE.search(text or "")
+    if not month_match:
+        return None
+    if month_match.group("day"):
+        day = int(month_match.group("day"))
+        month_name = month_match.group("month")
+        year = int(month_match.group("year"))
+    else:
+        day = int(month_match.group("day2"))
+        month_name = month_match.group("month2")
+        year = int(month_match.group("year2"))
+    month = _MONTHS.get(month_name.lower())
+    if not month:
+        return None
+    if year < 100:
+        year += 2000 if year < 70 else 1900
+    try:
+        return date(year, month, day).isoformat()
+    except ValueError:
+        return None
+
+
+def _date_label_source(line: str) -> Optional[str]:
+    lower = (line or "").lower()
+    if any(
+        token in lower
+        for token in ("collection", "collected", "sample", "specimen")
+    ):
+        return "collected"
+    if any(
+        token in lower
+        for token in ("report", "reported", "registered", "registration")
+    ):
+        return "reported"
+    return None
+
+
+def extract_report_date(text: str) -> tuple[Optional[str], Optional[str]]:
+    """Return ``(YYYY-MM-DD, source)`` where source is collected/reported.
+
+    Collection/sample/specimen dates are preferred over report/registration
+    dates regardless of where they appear. A date with no recognisable label is
+    treated as a report date. The caller falls back to the upload date when
+    this returns ``(None, None)``.
+    """
+    if not text or not text.strip():
+        return (None, None)
+    lines = [
+        line.strip()
+        for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    ]
+
+    for wanted in ("collected", "reported"):
+        for index, line in enumerate(lines):
+            if _date_label_source(line) != wanted:
+                continue
+            # Handle "Collection Date : 24/06/2023", "Collected on", "DATE-".
+            found = _date_in_text(line)
+            if found:
+                return (found, wanted)
+            # ...or on the next non-empty line ("Collection Date" then date).
+            for lookahead in range(index + 1, min(index + 4, len(lines))):
+                if not lines[lookahead]:
+                    continue
+                found = _date_in_text(lines[lookahead])
+                if found:
+                    return (found, wanted)
+                break
+
+    # Unknown label but a date is present: prefer it over the upload date.
+    for line in lines:
+        found = _date_in_text(line)
+        if found:
+            return (found, "reported")
+    return (None, None)
+
+
+def extract_collection_date(text: str) -> Optional[str]:
+    """Backward-compatible date helper: ISO date if any report date is printed.
+
+    Prefer :func:`extract_report_date` when the date source matters. The caller
+    falls back to the upload date when this returns ``None``.
+    """
+    return extract_report_date(text)[0]
+
+
 def parse_lab_results(
     text: str,
     gender: Optional[str] = None,
@@ -164,143 +800,11 @@ def parse_lab_results(
     if not text or not text.strip():
         return []
 
-    results: list[dict] = []
-    offset = 0
-    for line in text.splitlines():
-        line_len = len(line)
-        stripped = line.strip()
-        if not stripped:
-            offset += line_len + 1
-            continue
+    entries = _line_entries(text)
+    results = _parse_inline_lines(entries, gender)
+    seen = {r["canonical_name"] for r in results}
+    results.extend(_parse_stacked_blocks(entries, gender, seen))
 
-        # Printed ranges on this line (usually one). Map each to caller later;
-        # with a single test per line the first range belongs to the match.
-        range_match = _RANGE_RE.search(stripped)
-        printed = None
-        if range_match:
-            try:
-                printed = (float(range_match.group("low")), float(range_match.group("high")))
-            except ValueError:
-                printed = None
-
-        # Remove parenthetical groups so range text can't be parsed as values.
-        clean = _RANGE_RE.sub(" ", stripped)
-        # Hyphenated names ("LDL-Cholesterol") -> spaced so multi-word
-        # synonyms match; digit-hyphen cases ("25-OH") are left alone.
-        clean = re.sub(r"(?<=[A-Za-z])-(?=[A-Za-z])", " ", clean)
-
-        for name_match in _NAME_RE.finditer(clean):
-            synonym = name_match.group("name")
-            canonical = SYNONYM_TO_CANONICAL[synonym.lower()]
-            # Avoid double-counting the same test on one line (e.g. "HbA1c ...
-            # glycosylated hemoglobin ..." would match twice).
-            if any(r["canonical_name"] == canonical and r["_line"] == offset for r in results):
-                continue
-            rest = clean[name_match.end():]
-            sep = re.match(_SEP_RE, rest)
-            rest_after_sep = rest[sep.end():] if sep else rest
-            val_match = re.match(_VALUE_RE, rest_after_sep)
-            if not val_match:
-                continue
-            try:
-                value = float(val_match.group("value").replace(",", ""))
-            except ValueError:
-                continue
-            after_value = rest_after_sep[val_match.end():]
-            unit_raw = _extract_unit_text(after_value)
-            display_name = REFERENCE_RANGES[canonical]["display_name"]
-
-            # Absolute offsets into the original full text.
-            try:
-                name_pos = stripped.lower().index(synonym.lower())
-            except ValueError:
-                name_pos = 0
-            line_content_start = offset + (len(line) - len(line.lstrip()))
-            start = line_content_start + name_pos
-            end = line_content_start + len(stripped)
-
-            if printed is not None:
-                ref_low, ref_high = printed
-                results.append({
-                    "name": display_name,
-                    "canonical_name": canonical,
-                    "value": value,
-                    "unit": unit_raw,
-                    "ref_low": ref_low,
-                    "ref_high": ref_high,
-                    "flag": _flag(value, ref_low, ref_high),
-                    "range_source": "report",
-                    "source_text": stripped,
-                    "start": start,
-                    "end": end,
-                    "_line": offset,
-                })
-                continue
-
-            table_low, table_high, source = _table_range(canonical, gender)
-            if not unit_raw:
-                # Missing unit and no printed range: show table range but do
-                # not flag (unit cannot be verified).
-                results.append({
-                    "name": display_name,
-                    "canonical_name": canonical,
-                    "value": value,
-                    "unit": "",
-                    "ref_low": table_low,
-                    "ref_high": table_high,
-                    "flag": "unknown",
-                    "range_source": source,
-                    "source_text": stripped,
-                    "start": start,
-                    "end": end,
-                    "_line": offset,
-                })
-                continue
-
-            resolved = lookup_unit(canonical, unit_raw)
-            if resolved is None:
-                results.append({
-                    "name": display_name,
-                    "canonical_name": canonical,
-                    "value": value,
-                    "unit": unit_raw,
-                    "ref_low": table_low,
-                    "ref_high": table_high,
-                    "flag": "unknown",
-                    "range_source": source,
-                    "source_text": stripped,
-                    "start": start,
-                    "end": end,
-                    "_line": offset,
-                })
-                continue
-
-            family, factor = resolved
-            if family == "hba1c_ifcc":
-                std_value = convert_hba1c_ifcc_to_percent(value)
-                std_unit = "%"
-            else:
-                std_value = _convert_to_standard(canonical, value, family, factor)
-                std_unit = REFERENCE_RANGES[canonical]["standard_unit"]
-            results.append({
-                "name": display_name,
-                "canonical_name": canonical,
-                "value": round(std_value, 3),
-                "unit": std_unit,
-                "ref_low": table_low,
-                "ref_high": table_high,
-                "flag": _flag(std_value, table_low, table_high),
-                "range_source": source,
-                "source_text": stripped,
-                "start": start,
-                "end": end,
-                "_line": offset,
-            })
-
-        offset += line_len + 1
-
-    for r in results:
-        r.pop("_line", None)
     # Deterministic order: by position in text.
     results.sort(key=lambda r: (r["start"], r["canonical_name"]))
     return results

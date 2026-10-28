@@ -23,7 +23,8 @@ import {
   X,
   UserCheck,
   KeyRound,
-  CheckCircle2
+  CheckCircle2,
+  TrendingUp
 } from 'lucide-react'
 
 export default function Patients() {
@@ -544,6 +545,14 @@ export default function Patients() {
                       >
                         <FileText size={14} />
                         <span>Timeline</span>
+                      </Link>
+                      <Link
+                        to={`/doctor/trends/${encodeURIComponent(selectedPatient.patient_id || selectedPatient.user_id || selectedPatient.id)}`}
+                        className="btn btn-secondary btn-sm"
+                        style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, gridColumn: '1 / -1' }}
+                      >
+                        <TrendingUp size={14} />
+                        <span>Health Trends</span>
                       </Link>
                     </div>
                   </div>

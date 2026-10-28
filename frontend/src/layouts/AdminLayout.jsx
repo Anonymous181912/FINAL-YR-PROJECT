@@ -20,7 +20,6 @@ import {
   Bell,
   Sun,
   Moon,
-  Laptop,
   Search,
   ChevronLeft,
   ChevronRight,
@@ -152,10 +151,8 @@ export function ThemeToggle({ theme, onThemeChange }) {
         >
           {theme === 'dark' ? (
             <Moon className="w-5 h-5 text-amber-500" />
-          ) : theme === 'light' ? (
-            <Sun className="w-5 h-5 text-amber-500" />
           ) : (
-            <Laptop className="w-5 h-5" />
+            <Sun className="w-5 h-5 text-amber-500" />
           )}
         </button>
       </DropdownMenuTrigger>
@@ -168,10 +165,7 @@ export function ThemeToggle({ theme, onThemeChange }) {
           <Moon className="w-4 h-4 mr-2" />
           <span>Dark</span>
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onThemeChange('system')}>
-          <Laptop className="w-4 h-4 mr-2" />
-          <span>System</span>
-        </DropdownMenuItem>
+
       </DropdownMenuContent>
     </DropdownMenu>
   )
@@ -186,36 +180,26 @@ export default function AdminLayout() {
   const [mobileDrawerOpen, setMobileDrawerOpen] = React.useState(false)
   const [searchOpen, setSearchOpen] = React.useState(false)
 
-  // 3-state Theme: system | light | dark
+  // Theme: light | dark. OS preference is deliberately ignored so each portal
+  // keeps a fixed, deliberate appearance; the toggle is an explicit user choice.
   const [themePreference, setThemePreference] = React.useState(() => {
     try {
-      return localStorage.getItem('theme_pref') || 'system'
+      return localStorage.getItem('theme_pref') === 'dark' ? 'dark' : 'light'
     } catch {
-      return 'system'
+      return 'light'
     }
   })
 
   // Synchronize actual theme class/attribute on html root
   React.useEffect(() => {
     const root = document.documentElement
-    const applyTheme = (isDark) => {
-      if (isDark) {
-        root.setAttribute('data-theme', 'dark')
-        root.classList.add('dark')
-      } else {
-        root.setAttribute('data-theme', 'light')
-        root.classList.remove('dark')
-      }
-    }
-
-    if (themePreference === 'system') {
-      const media = window.matchMedia('(prefers-color-scheme: dark)')
-      applyTheme(media.matches)
-      const listener = (e) => applyTheme(e.matches)
-      media.addEventListener('change', listener)
-      return () => media.removeEventListener('change', listener)
+    const isDark = themePreference === 'dark'
+    if (isDark) {
+      root.setAttribute('data-theme', 'dark')
+      root.classList.add('dark')
     } else {
-      applyTheme(themePreference === 'dark')
+      root.setAttribute('data-theme', 'light')
+      root.classList.remove('dark')
     }
 
     try {
@@ -289,7 +273,7 @@ export default function AdminLayout() {
         className={`fixed md:sticky top-0 h-screen z-50 flex flex-col bg-amber-900 text-amber-50 border-r border-amber-800 transition-all duration-300 ease-in-out ${
           collapsed ? 'w-[72px]' : 'w-[264px]'
         } ${mobileDrawerOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}
-        style={{ background: 'linear-gradient(180deg, #78350f 0%, #b45309 100%)' }}
+        style={{ background: 'linear-gradient(180deg, #1e3a5f 0%, #0f172a 100%)' }}
       >
         {/* Brand Header */}
         <div className="h-16 flex items-center justify-between px-4 border-b border-amber-800/80 shrink-0">
@@ -440,7 +424,7 @@ export default function AdminLayout() {
             {/* Notification Bell */}
             <NotificationBell />
 
-            {/* Theme Toggle (System / Light / Dark) */}
+            {/* Theme Toggle (Light / Dark) */}
             <ThemeToggle
               theme={themePreference}
               onThemeChange={setThemePreference}

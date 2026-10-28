@@ -85,14 +85,13 @@ async def _llm_fallback(text: str) -> list[dict[str, Any]]:
 
         service = LLMService()
         payload = {
-            "model": service.model,
             "messages": service._build_messages(
                 "You extract medicine lists. Output valid JSON only.", prompt
             ),
-            "max_tokens": 1024,
+            "max_tokens": service.max_tokens,
             "temperature": 0.1,
         }
-        data = await service._post("chat/completions", payload)
+        data = await service._chat_completion(payload)
         raw = data.get("choices", [{}])[0].get("message", {}).get("content", "")
         match = re.search(r"\[.*\]", raw, re.DOTALL)
         if not match:

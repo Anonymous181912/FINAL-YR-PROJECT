@@ -156,12 +156,11 @@ class TestTrendsEndpoint:
         p.patient_id = pid
         return p
 
-    def _mock_repos(self, reports):
-        pr = patch("app.patients.router.PatientRepository")
-        # trends uses PatientRepository imported inside reports.router
-        rr = patch("app.database.repositories.patient_repository.PatientRepository")
-        sr = patch("app.reports.services.report_service.ReportRepository")
-        return pr, rr, sr
+    def _patch_repos(self, reports, patient=None):
+        pat_cls = patch("app.reports.trends_router.PatientRepository")
+        rep_cls = patch("app.reports.trends_router.ReportRepository")
+        audit = patch("app.reports.trends_router.log_access", new=AsyncMock())
+        return pat_cls, rep_cls, audit
 
     def test_patient_trends_two_points(self):
         from datetime import timedelta
@@ -169,55 +168,100 @@ class TestTrendsEndpoint:
         app.dependency_overrides[get_current_user] = lambda: _user("p1", "p@t.com", "patient", "P")
         try:
             t0 = datetime.now(timezone.utc) - timedelta(days=30)
-            r1 = _report("r1", "p1", [{"canonical_name": "hemoglobin", "value": 11.0, "unit": "g/dL",
-                                       "flag": "low", "ref_low": 12.0, "ref_high": 16.0,
-                                       "range_source": "default_adult"}], created=t0)
-            r2 = _report("r2", "p1", [{"canonical_name": "hemoglobin", "value": 13.0, "unit": "g/dL",
-                                       "flag": "normal", "ref_low": 12.0, "ref_high": 16.0,
-                                       "range_source": "default_adult"}])
-            with patch("app.database.repositories.patient_repository.PatientRepository") as pat_cls, \
-                 patch("app.reports.services.report_service.ReportRepository") as rep_cls:
+            r1 = _report("r1", "p1", [{"canonical_test": "hemoglobin", "canonical_name": "hemoglobin",
+                                       "value": 11.0, "unit": "g/dL", "flag": "low",
+                                       "ref_low": 12.0, "ref_high": 16.0,
+                                       "range_source": "table"}], created=t0)
+            r2 = _report("r2", "p1", [{"canonical_test": "hemoglobin", "canonical_name": "hemoglobin",
+                                       "value": 13.0, "unit": "g/dL", "flag": "normal",
+                                       "ref_low": 12.0, "ref_high": 16.0,
+                                       "range_source": "table"}])
+            with patch("app.reports.trends_router.PatientRepository") as pat_cls, \
+                 patch("app.reports.trends_router.ReportRepository") as rep_cls, \
+                 patch("app.reports.trends_router.log_access", new=AsyncMock()):
                 pat = AsyncMock()
                 pat.get_by_user_id.return_value = self._patient()
                 pat.get_by_patient_id.return_value = self._patient()
                 pat_cls.return_value = pat
                 rep = AsyncMock()
-                rep.list_by_patient.return_value = [r1, r2]
+                rep.list_all_for_patients.return_value = [r1, r2]
                 rep_cls.return_value = rep
-                r = client.get("/api/v1/reports/trends", params={"test": "hemoglobin"},
+                r = client.get("/api/v1/trends/hemoglobin",
                                headers={"Authorization": f"Bearer {_token('p1', 'p@t.com', 'patient')}"})
                 assert r.status_code == 200, r.text
                 body = r.json()
-                assert body["test"] == "hemoglobin"
+                assert body["canonical_test"] == "hemoglobin"
                 assert len(body["points"]) == 2
                 assert body["points"][0]["report_id"] == "r1"  # chronological
-                assert "disclaimer" in body
+                assert "This is not a diagnosis" in body["explanation"]
         finally:
             app.dependency_overrides.pop(get_current_user, None)
 
-    def test_trends_single_point_empty_ok(self):
+    def test_trends_uses_collection_date_with_upload_fallback(self):
+        from datetime import timedelta
+
         app.dependency_overrides[get_current_user] = lambda: _user("p1", "p@t.com", "patient", "P")
         try:
-            with patch("app.database.repositories.patient_repository.PatientRepository") as pat_cls, \
-                 patch("app.reports.services.report_service.ReportRepository") as rep_cls:
+            t0 = datetime.now(timezone.utc) - timedelta(days=30)
+            r1 = _report("r1", "p1", [{"canonical_test": "hemoglobin", "canonical_name": "hemoglobin",
+                                       "value": 11.0, "unit": "g/dL", "flag": "low",
+                                       "ref_low": 12.0, "ref_high": 16.0,
+                                       "range_source": "table"}], created=t0)
+            r1.extracted_text = "Collection Date\n24/06/2023 08.49 PM\nHemoglobin 11.0 g/dL"
+            r2 = _report("r2", "p1", [{"canonical_test": "hemoglobin", "canonical_name": "hemoglobin",
+                                       "value": 13.0, "unit": "g/dL", "flag": "normal",
+                                       "ref_low": 12.0, "ref_high": 16.0,
+                                       "range_source": "table"}])
+            r2.extracted_text = "Hemoglobin 13.0 g/dL"
+            with patch("app.reports.trends_router.PatientRepository") as pat_cls, \
+                 patch("app.reports.trends_router.ReportRepository") as rep_cls, \
+                 patch("app.reports.trends_router.log_access", new=AsyncMock()):
                 pat = AsyncMock()
                 pat.get_by_user_id.return_value = self._patient()
                 pat.get_by_patient_id.return_value = self._patient()
                 pat_cls.return_value = pat
                 rep = AsyncMock()
-                rep.list_by_patient.return_value = [_report("r1", "p1", [])]
+                rep.list_all_for_patients.return_value = [r1, r2]
                 rep_cls.return_value = rep
-                r = client.get("/api/v1/reports/trends", params={"test": "Hb"},
+                r = client.get("/api/v1/trends/hemoglobin",
+                               headers={"Authorization": f"Bearer {_token('p1', 'p@t.com', 'patient')}"})
+                assert r.status_code == 200, r.text
+                points = r.json()["points"]
+                assert points[0]["collected_on"] == "2023-06-24"
+                assert points[0]["date_source"] == "collected"
+                assert points[1]["date_source"] == "upload"
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+
+    def test_trends_single_point_insufficient_data(self):
+        app.dependency_overrides[get_current_user] = lambda: _user("p1", "p@t.com", "patient", "P")
+        try:
+            one = _report("r1", "p1", [{"canonical_test": "hemoglobin", "canonical_name": "hemoglobin",
+                                        "value": 13.0, "unit": "g/dL", "flag": "normal",
+                                        "ref_low": 12.0, "ref_high": 16.0,
+                                        "range_source": "table"}])
+            with patch("app.reports.trends_router.PatientRepository") as pat_cls, \
+                 patch("app.reports.trends_router.ReportRepository") as rep_cls, \
+                 patch("app.reports.trends_router.log_access", new=AsyncMock()):
+                pat = AsyncMock()
+                pat.get_by_user_id.return_value = self._patient()
+                pat.get_by_patient_id.return_value = self._patient()
+                pat_cls.return_value = pat
+                rep = AsyncMock()
+                rep.list_all_for_patients.return_value = [one]
+                rep_cls.return_value = rep
+                r = client.get("/api/v1/trends/Hb",
                                headers={"Authorization": f"Bearer {_token('p1', 'p@t.com', 'patient')}"})
                 assert r.status_code == 200
-                assert r.json()["points"] == []
+                assert r.json()["point_count"] == 1
+                assert r.json()["direction"] == "insufficient_data"
         finally:
             app.dependency_overrides.pop(get_current_user, None)
 
     def test_trends_unknown_test_400(self):
         app.dependency_overrides[get_current_user] = lambda: _user("p1", "p@t.com", "patient", "P")
         try:
-            r = client.get("/api/v1/reports/trends", params={"test": "unobtanium"},
+            r = client.get("/api/v1/trends/unobtanium",
                            headers={"Authorization": f"Bearer {_token('p1', 'p@t.com', 'patient')}"})
             assert r.status_code == 400
         finally:
@@ -226,9 +270,16 @@ class TestTrendsEndpoint:
     def test_doctor_needs_patient_id(self):
         app.dependency_overrides[get_current_user] = lambda: _user("d1", "d@t.com", "doctor", "Dr")
         try:
-            r = client.get("/api/v1/reports/trends", params={"test": "hemoglobin"},
-                           headers={"Authorization": f"Bearer {_token('d1', 'd@t.com', 'doctor')}"})
-            assert r.status_code == 400
+            doctor = AsyncMock()
+            doctor.is_verified = True
+            doctor.verification_status = "approved"
+            with patch(
+                "app.database.repositories.doctor_repository.DoctorRepository.get_by_user_id",
+                new=AsyncMock(return_value=doctor),
+            ):
+                r = client.get("/api/v1/trends/hemoglobin",
+                               headers={"Authorization": f"Bearer {_token('d1', 'd@t.com', 'doctor')}"})
+                assert r.status_code == 400
         finally:
             app.dependency_overrides.pop(get_current_user, None)
 
@@ -236,19 +287,57 @@ class TestTrendsEndpoint:
         # patient role ignores patient_id param and uses own profile
         app.dependency_overrides[get_current_user] = lambda: _user("pa", "a@t.com", "patient", "A")
         try:
-            with patch("app.database.repositories.patient_repository.PatientRepository") as pat_cls, \
-                 patch("app.reports.services.report_service.ReportRepository") as rep_cls:
+            with patch("app.reports.trends_router.PatientRepository") as pat_cls, \
+                 patch("app.reports.trends_router.ReportRepository") as rep_cls, \
+                 patch("app.reports.trends_router.log_access", new=AsyncMock()):
                 pat = AsyncMock()
                 pat.get_by_user_id.return_value = self._patient(pid="pa", uid="pa")
                 pat.get_by_patient_id.return_value = self._patient(pid="pa", uid="pa")
                 pat_cls.return_value = pat
                 rep = AsyncMock()
-                rep.list_by_patient.return_value = []
+                rep.list_all_for_patients.return_value = []
                 rep_cls.return_value = rep
-                r = client.get("/api/v1/reports/trends", params={"test": "wbc", "patient_id": "pb"},
+                r = client.get("/api/v1/trends/wbc", params={"patient_id": "pb"},
                                headers={"Authorization": f"Bearer {_token('pa', 'a@t.com', 'patient')}"})
                 assert r.status_code == 200
-                rep.list_by_patient.assert_called_once()
-                assert rep.list_by_patient.call_args[0][0] == "pa"
+                rep.list_all_for_patients.assert_called_once()
+                ids = rep.list_all_for_patients.call_args[0][0]
+                assert "pa" in ids
+                assert "pb" not in ids
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+
+    def test_summary_lists_only_tests_with_two_points(self):
+        app.dependency_overrides[get_current_user] = lambda: _user("p1", "p@t.com", "patient", "P")
+        try:
+            r1 = _report("r1", "p1", [
+                {"canonical_test": "hemoglobin", "canonical_name": "hemoglobin", "value": 11.0,
+                 "unit": "g/dL", "flag": "low", "ref_low": 12.0, "ref_high": 16.0,
+                 "range_source": "table"},
+                {"canonical_test": "wbc", "canonical_name": "wbc", "value": 7.0,
+                 "unit": "x10^3/uL", "flag": "normal", "ref_low": 4.0, "ref_high": 11.0,
+                 "range_source": "table"},
+            ])
+            r2 = _report("r2", "p1", [
+                {"canonical_test": "hemoglobin", "canonical_name": "hemoglobin", "value": 13.0,
+                 "unit": "g/dL", "flag": "normal", "ref_low": 12.0, "ref_high": 16.0,
+                 "range_source": "table"},
+            ])
+            with patch("app.reports.trends_router.PatientRepository") as pat_cls, \
+                 patch("app.reports.trends_router.ReportRepository") as rep_cls, \
+                 patch("app.reports.trends_router.log_access", new=AsyncMock()):
+                pat = AsyncMock()
+                pat.get_by_user_id.return_value = self._patient()
+                pat.get_by_patient_id.return_value = self._patient()
+                pat_cls.return_value = pat
+                rep = AsyncMock()
+                rep.list_all_for_patients.return_value = [r1, r2]
+                rep_cls.return_value = rep
+                r = client.get("/api/v1/trends/summary",
+                               headers={"Authorization": f"Bearer {_token('p1', 'p@t.com', 'patient')}"})
+                assert r.status_code == 200, r.text
+                body = r.json()
+                assert [item["canonical_test"] for item in body["tests"]] == ["hemoglobin"]
+                assert body["insufficient_tests"][0]["canonical_test"] == "wbc"
         finally:
             app.dependency_overrides.pop(get_current_user, None)

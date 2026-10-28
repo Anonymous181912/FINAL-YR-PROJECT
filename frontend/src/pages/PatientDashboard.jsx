@@ -171,7 +171,7 @@ export default function PatientDashboard() {
           {loading && <p style={{ color: 'var(--slate-500)', padding: 12 }}>Loading latest report...</p>}
 
           {!loading && !latestReport && (
-            <div style={{ textAlign: 'center', padding: '36px 16px', color: 'var(--slate-400)' }}>
+            <div style={{ textAlign: 'center', padding: '36px 16px', color: 'var(--slate-500)' }}>
               <FileCheck size={36} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
               <p style={{ fontWeight: 600, color: 'var(--slate-700)' }}>No medical reports uploaded yet</p>
               <p style={{ fontSize: '0.85rem' }}>Upload your first lab report to get an AI interpretation</p>
@@ -225,7 +225,7 @@ export default function PatientDashboard() {
           )}
 
           {!loading && !latestPrescription && (
-            <div style={{ textAlign: 'center', padding: '36px 16px', color: 'var(--slate-400)' }}>
+            <div style={{ textAlign: 'center', padding: '36px 16px', color: 'var(--slate-500)' }}>
               <Pill size={36} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
               <p style={{ fontWeight: 600, color: 'var(--slate-700)' }}>No prescriptions found</p>
               <p style={{ fontSize: '0.85rem' }}>Prescriptions prescribed by your doctor will appear here</p>

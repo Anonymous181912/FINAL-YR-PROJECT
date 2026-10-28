@@ -2,6 +2,20 @@
 
 All notable changes, newest first. Format: conventional-commit style entries.
 
+## [Unreleased] — Longitudinal health trends
+
+### feat(trends): deterministic longitudinal lab analysis
+- New `/trends/summary`, `/trends/{canonical_test}`, and patient-only
+  `/trends/{test}/points/{report_id}` endpoints. Standard-unit values, date
+  source fallback, duplicate handling, direction/events, template explanations,
+  not-comparable reporting, doctor grant checks, and audit logging.
+- Parser now stores original value/unit, canonical test, and date/range source;
+  reparse script enriches existing reports without overwriting patient edits.
+- New patient/doctor Health Trends UI with reference-band chart, value table,
+  patient exclude/correct/restore controls, demo seed, and responsive light/dark
+  styling. Removed the old Lab Trends tab.
+- Tests: 16 backend trend tests + 2 frontend HealthTrends tests.
+
 ## [Unreleased] — Phase 6: Polish
 
 ### feat(auth): refresh rotation, reset, lockout

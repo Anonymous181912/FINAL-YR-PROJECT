@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Navigate, Link } from 'react-router-dom'
 import { useAuth } from '../auth.jsx'
+import { useFixedLightTheme } from '../utils/useFixedLightTheme.js'
 import {
   ShieldCheck,
   Mail,
@@ -18,6 +19,7 @@ export default function AdminLogin() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const { login } = useAuth()
+  useFixedLightTheme()
 
   if (typeof window !== 'undefined') {
     const token = localStorage.getItem('access_token')
@@ -53,9 +55,9 @@ export default function AdminLogin() {
   }
 
   return (
-    <div className="auth-page-container">
+    <div className="auth-page-container" data-portal="admin">
       {/* Left Feature Showcase Hero Pane */}
-      <div className="auth-hero-pane" style={{ background: 'linear-gradient(135deg, var(--slate-800), var(--slate-900))' }}>
+      <div className="auth-hero-pane">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div className="sidebar-logo-icon" style={{ width: 44, height: 44 }}>
             <KeyRound size={24} color="#fbbf24" />
@@ -136,7 +138,7 @@ export default function AdminLogin() {
               border: '1px solid rgba(239, 68, 68, 0.3)',
               borderRadius: 'var(--radius-md)',
               padding: '12px 14px',
-              color: '#fca5a5',
+              color: '#b91c1c',
               fontSize: '0.86rem',
               marginBottom: 20
             }}>
@@ -195,7 +197,7 @@ export default function AdminLogin() {
 
             <button
               type="submit"
-              className="btn btn-primary"
+              className="btn btn-navy"
               style={{ width: '100%', marginTop: 8, padding: '12px' }}
               disabled={loading}
             >
@@ -212,8 +214,8 @@ export default function AdminLogin() {
 
           <div style={{ textAlign: 'center', marginTop: 24, paddingTop: 20, borderTop: '1px solid var(--slate-200)' }}>
             <p style={{ color: 'var(--slate-500)', fontSize: '0.8rem' }}>
-              <Link to="/patient/login" style={{ color: 'var(--teal-600)', fontWeight: 600 }}>Patient Portal</Link> &bull; 
-              <Link to="/doctor/login" style={{ color: 'var(--primary-600)', fontWeight: 600 }}>Doctor Portal</Link>
+              <Link to="/patient/login" style={{ color: 'var(--teal-700)', fontWeight: 600 }}>Patient Portal</Link> &bull; 
+              <Link to="/doctor/login" style={{ color: 'var(--primary-700)', fontWeight: 600 }}>Doctor Portal</Link>
             </p>
           </div>
         </div>

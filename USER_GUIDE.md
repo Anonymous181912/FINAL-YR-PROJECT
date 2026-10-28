@@ -34,8 +34,12 @@ you (for example `http://localhost:8080`) and skip to "Demo script".
    containing e.g. `Hemoglobin 9.5 g/dL` and `WBC 12,000 /cumm`. Show the
    lab table: red **High** / amber **Low** badges and the range source.
    Upload a second report with different values.
-3. **Trends (1 min).** Open the Lab Trends tab, pick Hemoglobin: line chart
-   with the shaded reference band. With one report it explains it needs two.
+3. **Health Trends (2 min).** Open **Health Trends**, pick Hemoglobin: line
+   chart with the shaded reference band, direction/range events, and a
+   template explanation. Show **Correct** / **Exclude** on a report value.
+   With one report it says there is not enough data. For a ready-made demo,
+   run `python scripts/seed_demo_trends.py`, then sign in as
+   `demo.trends@example.com` / `DemoTrends123!` (3 reports, 6 tests).
 4. **AI interpretation (2 min).** Click Interpret → plain-language summary.
    Point at a finding's **Verified in report** badge and the highlighted
    quote in the text. Use the language selector + Listen button.

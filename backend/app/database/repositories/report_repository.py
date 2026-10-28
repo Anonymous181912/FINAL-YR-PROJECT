@@ -28,6 +28,15 @@ class ReportRepository(BaseRepository):
         docs = await cursor.to_list(length=limit)
         return [ReportInDB(**doc) for doc in docs]
 
+    async def list_all_for_patients(self, patient_ids: list[str]) -> list[ReportInDB]:
+        """All reports for any of the patient/user ids (trend history)."""
+        ids = [value for value in dict.fromkeys(patient_ids) if value]
+        if not ids:
+            return []
+        cursor = self.collection.find({"patient_id": {"$in": ids}})
+        docs = await cursor.to_list(length=None)
+        return [ReportInDB(**doc) for doc in docs]
+
     async def update_nlp(self, report_id: str, entities: list[dict], nlp_status: str) -> Optional[ReportInDB]:
         from datetime import datetime, timezone
         data = {

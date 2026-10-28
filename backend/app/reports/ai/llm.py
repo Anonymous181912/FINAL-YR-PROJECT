@@ -1,14 +1,28 @@
+import asyncio
 import httpx
 import json
 import logging
+import re
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from app.core.config import settings
 from app.schemas.ai_interpretation import LLMInterpretationResponse
 
 logger = logging.getLogger("healthcare_system")
 
+AI_BUSY_MESSAGE = "The AI service is busy, please try again in a minute."
+AI_INVALID_MESSAGE = "The AI service returned an invalid response. Please try again."
+
+_RETRY_IN_MESSAGE_RE = re.compile(r"try again in\s+([\d.]+)\s*(ms|s|m)?", re.IGNORECASE)
+
+
 class LLMServiceError(Exception):
-    pass
+    """Internal LLM failure with a safe message for API clients."""
+
+    def __init__(self, message: str, public_message: str | None = None):
+        super().__init__(message)
+        self.public_message = public_message or message
 
 
 def _clean_json_content(content: str) -> str:
@@ -24,6 +38,48 @@ def _clean_json_content(content: str) -> str:
     return text
 
 
+def _retry_after_seconds(response: httpx.Response, attempt: int) -> float:
+    """Best-effort Retry-After: header first, then provider text, then backoff."""
+    headers = getattr(response, "headers", {}) or {}
+    raw_header = headers.get("retry-after") or headers.get("Retry-After")
+    if raw_header:
+        try:
+            return max(0.0, float(raw_header))
+        except (TypeError, ValueError):
+            try:
+                when = parsedate_to_datetime(raw_header)
+                if when.tzinfo is None:
+                    when = when.replace(tzinfo=timezone.utc)
+                return max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
+            except (TypeError, ValueError, OverflowError):
+                pass
+
+    try:
+        message = (response.json().get("error") or {}).get("message") or ""
+    except Exception:
+        message = getattr(response, "text", "") or ""
+    match = _RETRY_IN_MESSAGE_RE.search(message)
+    if match:
+        try:
+            amount = float(match.group(1))
+            unit = (match.group(2) or "s").lower()
+            if unit == "ms":
+                amount /= 1000.0
+            elif unit == "m":
+                amount *= 60.0
+            return max(0.0, amount)
+        except (TypeError, ValueError):
+            pass
+    return float(min(2 ** attempt, 10))
+
+
+def _provider_detail(exc: httpx.HTTPStatusError) -> str:
+    try:
+        return (exc.response.json().get("error") or {}).get("message") or exc.response.text[:200]
+    except Exception:
+        return exc.response.text[:200] if exc.response.text else "Request failed"
+
+
 class LLMService:
     """
     OpenAI-compatible LLM client (OmniRoute, Groq, etc.).
@@ -34,12 +90,29 @@ class LLMService:
         self.api_key = settings.omni_route_api_key
         self.base_url = settings.omni_route_base_url
         # Phase 4e: per-feature model override (falls back to default model).
-        self.model = model or settings.omni_route_model
+        configured_model = getattr(settings, "llm_model", "")
+        configured_model = configured_model.strip() if isinstance(configured_model, str) else ""
+        self.model = model or configured_model or settings.omni_route_model
+
+        fallback_model = getattr(settings, "llm_fallback_model", "")
+        fallback_model = fallback_model.strip() if isinstance(fallback_model, str) else ""
+        self.fallback_model = fallback_model or None
+        if self.fallback_model and self.fallback_model == self.model:
+            self.fallback_model = None
+
+        max_tokens = getattr(settings, "llm_max_output_tokens", 0)
+        self.max_tokens = (
+            max_tokens
+            if isinstance(max_tokens, int) and max_tokens > 0
+            else settings.omni_route_max_tokens
+        )
         self.timeout = settings.omni_route_timeout
-        self.max_tokens = settings.omni_route_max_tokens
 
         if not self.api_key:
-            raise LLMServiceError("OMNIROUTE_API_KEY is not configured")
+            raise LLMServiceError(
+                "OMNIROUTE_API_KEY is not configured",
+                public_message="AI interpretation service is not configured. Please contact support.",
+            )
 
     def _get_url(self, endpoint: str) -> str:
         base = self.base_url.rstrip("/")
@@ -70,6 +143,88 @@ class LLMService:
             response.raise_for_status()
             return response.json()
 
+    async def _chat_completion(self, payload: dict, endpoint: str = "chat/completions") -> dict:
+        """Call chat/completions with 429 retry/backoff and optional fallback model.
+
+        Public errors never include provider IDs, billing links, or raw payloads.
+        """
+        models: list[str] = []
+        for candidate in (self.model, self.fallback_model):
+            if candidate and candidate not in models:
+                models.append(candidate)
+
+        last_exc: Exception | None = None
+        for model_index, model in enumerate(models):
+            has_fallback = model_index < len(models) - 1
+            for attempt in range(3):
+                try:
+                    data = await self._post(endpoint, {**payload, "model": model})
+                    try:
+                        usage = data.get("usage") or {}
+                        logger.info(
+                            "LLM usage: model=%s prompt=%s completion=%s total=%s",
+                            model,
+                            usage.get("prompt_tokens"),
+                            usage.get("completion_tokens"),
+                            usage.get("total_tokens"),
+                        )
+                    except Exception:
+                        pass
+                    return data
+                except httpx.HTTPStatusError as exc:
+                    last_exc = exc
+                    status_code = exc.response.status_code
+                    if status_code == 429 and attempt < 2:
+                        delay = min(_retry_after_seconds(exc.response, attempt), 15.0)
+                        logger.warning(
+                            "LLM rate-limited (429) on model %s; retrying in %.1fs", model, delay
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+
+                    detail = _provider_detail(exc)
+                    logger.error(
+                        "LLM API error (status %s, model %s): %s",
+                        status_code,
+                        model,
+                        detail,
+                    )
+                    # Auth failures affect every model; everything else may work
+                    # with the fallback model.
+                    if has_fallback and status_code not in (401, 403):
+                        logger.warning("Trying fallback model %s", models[model_index + 1])
+                        break
+                    raise LLMServiceError(
+                        f"LLM provider error ({status_code}, model {model}): {detail}",
+                        public_message=AI_BUSY_MESSAGE,
+                    ) from exc
+                except (httpx.TimeoutException, httpx.NetworkError) as exc:
+                    last_exc = exc
+                    if has_fallback:
+                        logger.warning("Model %s unreachable; trying fallback model", model)
+                        break
+                    raise LLMServiceError(
+                        "LLM request failed after network retries",
+                        public_message=AI_BUSY_MESSAGE,
+                    ) from exc
+                except Exception as exc:
+                    last_exc = exc
+                    if has_fallback:
+                        logger.warning("Model %s failed; trying fallback model", model)
+                        break
+                    logger.error("LLM request failed: %s", exc)
+                    raise LLMServiceError(
+                        "LLM request failed",
+                        public_message=AI_BUSY_MESSAGE,
+                    ) from exc
+
+        if last_exc is not None:
+            raise LLMServiceError(
+                f"LLM request failed: {last_exc}",
+                public_message=AI_BUSY_MESSAGE,
+            ) from last_exc
+        raise LLMServiceError("LLM request failed", public_message=AI_BUSY_MESSAGE)
+
     def _build_messages(self, system_prompt: str, user_prompt: str) -> list[dict]:
         return [
             {"role": "system", "content": system_prompt},
@@ -78,14 +233,24 @@ class LLMService:
 
     async def interpret_report(self, structured_medical_data: dict, language: str = "en") -> LLMInterpretationResponse:
         language = (language or "en").lower()
+        is_english = language in ("en", "english")
         lang_instruction = (
             "Write the patient-facing fields (summary, key finding explanations, "
             "measurement explanations, medical-term explanations, limitations) in English."
-            if language in ("en", "english")
+            if is_english
             else f"Write the patient-facing fields (summary, key finding explanations, "
                  f"measurement explanations, medical-term explanations, limitations) in language code '{language}'. "
                  f"Always keep the original English medical term first in brackets, e.g. 'हीमोग्लोबिन (Hemoglobin)'. "
                  f"The finding titles themselves stay in English."
+        )
+        # Keep responses small: large outputs are the main cause of provider
+        # OTPM 429s. Non-English responses are shorter to stay within budget.
+        brevity = (
+            "Keep the summary under 80 words. Return at most 5 key findings, 8 measurements, "
+            "5 medical terms, and 3 limitations. Keep every explanation to one short sentence."
+            if is_english
+            else "Keep the summary under 50 words. Return at most 3 key findings, 5 measurements, "
+                 "3 medical terms, and 2 limitations. Keep every explanation to one short sentence."
         )
         system_prompt = (
             "You are a medical information interpreter for patients. "
@@ -99,7 +264,8 @@ class LLMService:
         user_prompt = (
             "Please interpret the following structured medical report data for a patient:\n\n"
             f"{json.dumps(structured_medical_data, indent=2)}\n\n"
-            f"{lang_instruction}\n\n"
+            f"{lang_instruction}\n"
+            f"{brevity}\n\n"
             "Return a JSON object with the following schema:\n"
             "{\n"
             '  "summary": "brief patient-friendly summary",\n'
@@ -112,7 +278,6 @@ class LLMService:
             "}"
         )
         payload = {
-            "model": self.model,
             "messages": self._build_messages(system_prompt, user_prompt),
             "max_tokens": self.max_tokens,
             "temperature": 0.3,
@@ -120,19 +285,13 @@ class LLMService:
         }
 
         try:
-            data = await self._post("chat/completions", payload)
-            # Phase 4e: log token usage for cost tracking (never the content).
-            try:
-                usage = data.get("usage") or {}
-                logger.info(
-                    "LLM interpret usage: model=%s prompt=%s completion=%s total=%s",
-                    self.model, usage.get("prompt_tokens"), usage.get("completion_tokens"), usage.get("total_tokens"),
-                )
-            except Exception:
-                pass
+            data = await self._chat_completion(payload)
             content = data.get("choices", [{}])[0].get("message", {}).get("content")
             if not content:
-                raise LLMServiceError("Empty response from LLM provider")
+                raise LLMServiceError(
+                    "Empty response from LLM provider",
+                    public_message=AI_INVALID_MESSAGE,
+                )
 
             cleaned_content = _clean_json_content(content)
             try:
@@ -142,7 +301,7 @@ class LLMService:
                 return result
             except (json.JSONDecodeError, ValueError) as first_exc:
                 # Phase 4e: one repair retry with the error spelled out.
-                logger.warning(f"LLM JSON validation failed, retrying with repair prompt: {first_exc}")
+                logger.warning("LLM JSON validation failed, retrying with repair prompt: %s", first_exc)
                 repair_messages = self._build_messages(
                     system_prompt,
                     "Your previous reply was not valid JSON for the required schema. "
@@ -150,58 +309,52 @@ class LLMService:
                     "Reply with ONLY a corrected valid JSON object matching the schema, no other text.",
                 )
                 repair_payload = {**payload, "messages": repair_messages, "temperature": 0.1}
-                repair_data = await self._post("chat/completions", repair_payload)
+                repair_data = await self._chat_completion(repair_payload)
                 repair_content = repair_data.get("choices", [{}])[0].get("message", {}).get("content")
                 if not repair_content:
-                    raise LLMServiceError("Empty response from LLM provider on repair retry")
+                    raise LLMServiceError(
+                        "Empty response from LLM provider on repair retry",
+                        public_message=AI_INVALID_MESSAGE,
+                    )
                 try:
                     repaired = LLMInterpretationResponse(**json.loads(_clean_json_content(repair_content)))
                     repaired.language = language
                     return repaired
                 except (json.JSONDecodeError, ValueError) as exc:
-                    raise LLMServiceError("Invalid JSON returned by LLM provider") from exc
+                    raise LLMServiceError(
+                        "Invalid JSON returned by LLM provider",
+                        public_message=AI_INVALID_MESSAGE,
+                    ) from exc
 
-        except httpx.HTTPStatusError as exc:
-            status_code = exc.response.status_code
-            detail_msg = None
-            try:
-                err_json = exc.response.json()
-                detail_msg = err_json.get("error", {}).get("message")
-            except Exception:
-                detail_msg = exc.response.text[:200]
-
-            logger.error(
-                f"LLM API error (status {status_code}, model {self.model}): {detail_msg or 'Request failed'}"
-            )
-            raise LLMServiceError(
-                f"LLM provider error ({status_code}): {detail_msg or 'Request failed'}"
-            ) from exc
-        except json.JSONDecodeError as exc:
-            logger.error(f"Failed to parse LLM JSON response: {exc}")
-            raise LLMServiceError("Invalid JSON returned by LLM provider") from exc
         except LLMServiceError:
             raise
+        except json.JSONDecodeError as exc:
+            logger.error("Failed to parse LLM JSON response: %s", exc)
+            raise LLMServiceError(
+                "Invalid JSON returned by LLM provider",
+                public_message=AI_INVALID_MESSAGE,
+            ) from exc
         except Exception as exc:
-            logger.error(f"LLM request failed: {exc}")
-            raise LLMServiceError("LLM request failed") from exc
+            logger.error("LLM request failed: %s", exc)
+            raise LLMServiceError("LLM request failed", public_message=AI_BUSY_MESSAGE) from exc
 
     async def generate_prescription_summary(self, prescription_data: dict) -> str:
         system_prompt = (
             "You are an assistant that creates patient-friendly summaries of prescriptions. "
             "DO NOT modify the doctor's instructions. "
-            "Only summarize the given prescription in simple terms."
+            "Only summarize the given prescription in simple terms. "
+            "Keep the summary under 80 words."
         )
         user_prompt = f"Summarize this prescription data:\n{json.dumps(prescription_data)}"
         payload = {
-            "model": self.model,
             "messages": self._build_messages(system_prompt, user_prompt),
-            "max_tokens": 1024,
+            "max_tokens": self.max_tokens,
             "temperature": 0.2,
         }
 
         try:
-            data = await self._post("chat/completions", payload)
+            data = await self._chat_completion(payload)
             return data.get("choices", [{}])[0].get("message", {}).get("content", "")
         except Exception as exc:
-            logger.error(f"Prescription summary generation failed: {exc}")
+            logger.error("Prescription summary generation failed: %s", exc)
             return "Could not generate summary."
