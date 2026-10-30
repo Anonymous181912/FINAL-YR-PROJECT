@@ -45,11 +45,9 @@ flowchart LR
     UI[React 18 + Vite UI] -->|REST /api/v1| API[FastAPI backend]
     API --> AUTH[JWT auth + roles]
     API --> OCR[OCR + rule NLP + lab parser]
-    API --> LLM[OmniRoute LLM gateway]
     API --> RX[Prescriptions + safety + QR PDF]
     API --> CONSENT[Consent grants + audit log]
-    API --> NOTIF[Reminder scheduler + SMTP optional]
-    API <--> MONGO[(MongoDB via Motor)]
+    API <--> MONGO[(MongoDB)]
     UI -->|QR links| PUB[Public verify pages]
     PUB --> API
 ```
