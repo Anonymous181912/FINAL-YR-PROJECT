@@ -122,6 +122,11 @@ def _create_mock_prescription(prescription_id, patient_id, doctor_id, created_at
     mock_rx.prescription_date = prescription_date
     mock_rx.items = [{"medicine_name": "Aspirin", "dosage": "100mg", "frequency": "OD", "duration": "3 days"}]
     mock_rx.status = "draft"
+    mock_rx.source = "doctor_issued"
+    mock_rx.verified = True
+    mock_rx.confirmed_by_patient = False
+    mock_rx.prescriber_name = None
+    mock_rx.original_file_name = None
     mock_rx.safety_warnings = []
     mock_rx.acknowledged_warnings = False
     mock_rx.verification_token = None

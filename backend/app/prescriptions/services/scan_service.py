@@ -53,6 +53,7 @@ def _rule_based_parse(text: str) -> list[dict[str, Any]]:
             "duration": (dur.group("duration") if dur else "7 days")[:100],
             "route": "Oral",
             "instructions": "",
+            "confidence": 0.55 if not freq else 0.7,
             "needs_review": True,
         })
     # Deduplicate by (name, dosage).
@@ -109,7 +110,7 @@ async def _llm_fallback(text: str) -> list[dict[str, Any]]:
                 frequency=str(entry.get("frequency") or "OD")[:100],
                 duration=str(entry.get("duration") or "7 days")[:100],
             )
-            items.append({**item.model_dump(), "needs_review": True})
+            items.append({**item.model_dump(), "confidence": 0.5, "needs_review": True})
         return items
     except Exception as exc:
         logger.warning(f"LLM scan fallback failed (non-fatal): {exc}")
@@ -126,23 +127,46 @@ async def parse_prescription_scan(file: UploadFile) -> dict[str, Any]:
         import os
         import tempfile
 
-        from app.reports.ai.ocr import OCRService, OCRServiceError
-
         suffix = os.path.splitext(filename)[1] or ".png"
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             tmp.write(await file.read())
             tmp_path = tmp.name
         try:
-            try:
-                text = await OCRService().extract_text(tmp_path)
-            except OCRServiceError as exc:
-                raise ValueError(f"OCR failed: {exc}") from exc
+            if suffix == ".pdf":
+                # Reuse the report pipeline's PDF extraction first; only fall
+                # back to OCR when the PDF has no embedded text layer.
+                from app.reports.services.pdf_extraction import (
+                    PDFExtractionError,
+                    PDFExtractionService,
+                )
+
+                pdf_service = PDFExtractionService()
+                if pdf_service.has_embedded_text(tmp_path):
+                    text = pdf_service.extract_text(tmp_path)
+                    ocr_used = False
+                else:
+                    from app.reports.ai.ocr import OCRService, OCRServiceError
+
+                    try:
+                        text = await OCRService().extract_text(tmp_path)
+                    except OCRServiceError as exc:
+                        raise ValueError(f"OCR failed: {exc}") from exc
+                    ocr_used = True
+            else:
+                from app.reports.ai.ocr import OCRService, OCRServiceError
+
+                try:
+                    text = await OCRService().extract_text(tmp_path)
+                except OCRServiceError as exc:
+                    raise ValueError(f"OCR failed: {exc}") from exc
+                ocr_used = True
+        except PDFExtractionError as exc:
+            raise ValueError(f"PDF extraction failed: {exc}") from exc
         finally:
             try:
                 os.remove(tmp_path)
             except OSError:
                 pass
-        ocr_used = True
 
     from app.reports.services.normalization import TextNormalizationService
 

@@ -286,6 +286,7 @@ export default function History() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 {dayEvents.map((event) => {
                   const isReport = event.event_type === 'REPORT'
+                  const isPaper = event.source === 'patient_uploaded'
                   return (
                     <div key={event.event_id} className="card card-hover" style={{ marginBottom: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
@@ -295,7 +296,13 @@ export default function History() {
                               {isReport ? <FileText size={11} /> : <Pill size={11} />}
                               {isReport ? 'Report' : 'Prescription'}
                             </span>
-                            {event.source_reference && (
+                            {isPaper && (
+                              <span className="badge badge-warning">
+                                <ShieldAlert size={11} />
+                                Patient-uploaded - not verified by a doctor
+                              </span>
+                            )}
+                            {!isPaper && event.source_reference && (
                               <span className="badge badge-success">
                                 <Sparkles size={11} /> AI Ready
                               </span>

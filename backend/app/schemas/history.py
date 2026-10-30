@@ -13,6 +13,8 @@ class HistoryEventResponse(BaseModel):
     summary: str
     source_id: str
     source_reference: Optional[str] = None
+    source: Optional[str] = None
+    verified: Optional[bool] = None
     created_at: datetime
 
     class Config:

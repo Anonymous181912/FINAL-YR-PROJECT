@@ -58,18 +58,35 @@ class HistoryService:
 
         for prescription in prescriptions:
             event_date = prescription.prescription_date or prescription.created_at
-            doctor_name = "Doctor"
-            try:
-                doctor = await self.doctor_repo.get_by_doctor_id(prescription.doctor_id)
-                if doctor:
-                    doctor_name = doctor.full_name or doctor_name
-            except Exception:
-                pass
-
+            source_value = getattr(prescription, "source", "doctor_issued")
+            if not isinstance(source_value, str):
+                source_value = "doctor_issued"
+            verified_value = getattr(prescription, "verified", True)
+            if not isinstance(verified_value, bool):
+                verified_value = True
             medicine_count = len(prescription.items) if prescription.items else 0
-            summary = f"Prescription issued by {doctor_name}"
-            if medicine_count:
-                summary += f" • {medicine_count} medicine(s)"
+
+            if source_value == "patient_uploaded":
+                prescriber = getattr(prescription, "prescriber_name", None)
+                prescriber = prescriber.strip() if isinstance(prescriber, str) else ""
+                title = "Paper Prescription"
+                summary = "Patient-uploaded \u00b7 not verified by a doctor"
+                if prescriber:
+                    summary += f" \u00b7 prescriber: {prescriber}"
+                if medicine_count:
+                    summary += f" \u00b7 {medicine_count} medicine(s)"
+            else:
+                doctor_name = "Doctor"
+                try:
+                    doctor = await self.doctor_repo.get_by_doctor_id(prescription.doctor_id)
+                    if doctor:
+                        doctor_name = doctor.full_name or doctor_name
+                except Exception:
+                    pass
+                title = "Digital Prescription"
+                summary = f"Prescription issued by {doctor_name}"
+                if medicine_count:
+                    summary += f" \u00b7 {medicine_count} medicine(s)"
 
             events.append(
                 HistoryEvent(
@@ -77,10 +94,12 @@ class HistoryService:
                     patient_id=str(prescription.patient_id),
                     event_type="PRESCRIPTION",
                     event_date=event_date,
-                    title="Digital Prescription",
+                    title=title,
                     summary=summary,
                     source_id=str(prescription.id),
                     source_reference=f"/prescriptions/{prescription.id}",
+                    source=source_value,
+                    verified=verified_value,
                     created_at=prescription.created_at,
                 )
             )

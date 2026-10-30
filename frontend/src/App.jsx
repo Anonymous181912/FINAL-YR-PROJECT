@@ -157,6 +157,7 @@ function AppRoutes() {
         <Route path="trends" element={<HealthTrends />} />
         <Route path="trends/:canonicalTest" element={<HealthTrends />} />
         <Route path="prescriptions" element={<PatientPrescriptions />} />
+        <Route path="prescriptions/digitize" element={<Navigate to="/patient/prescriptions" replace />} />
         <Route path="history" element={<PatientHistory />} />
         <Route path="profile" element={<PatientProfile />} />
         <Route path="access" element={<PatientAccess />} />

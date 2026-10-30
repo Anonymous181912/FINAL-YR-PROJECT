@@ -19,9 +19,17 @@ class PrescriptionBase(BaseModel):
     diagnosis_notes: Optional[str] = Field(None, max_length=2000)
     advice: Optional[str] = Field(None, max_length=2000)
     follow_up_date: Optional[datetime] = None
-    items: list[PrescriptionItem] = Field(..., min_length=1)
+    items: list[PrescriptionItem] = Field(default_factory=list)
     status: str = "draft"
     file_path: Optional[str] = None
+    file_type: Optional[str] = Field(None, max_length=20)
+    # Paper prescriptions uploaded by patients are a separate, unverified
+    # source and never enter doctor issuing/QR/revoke flows.
+    source: str = "doctor_issued"
+    verified: bool = True
+    confirmed_by_patient: bool = False
+    prescriber_name: Optional[str] = Field(None, max_length=200)
+    original_file_name: Optional[str] = Field(None, max_length=255)
     # Phase 2a: stored safety flags (educational, not clinical advice).
     safety_warnings: list[dict[str, Any]] = Field(default_factory=list)
     acknowledged_warnings: bool = False

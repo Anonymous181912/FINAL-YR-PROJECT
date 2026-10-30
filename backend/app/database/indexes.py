@@ -4,6 +4,7 @@ from app.database.collections import (
     DOCTOR_PROFILES,
     REPORTS,
     PRESCRIPTIONS,
+    PAPER_UPLOADS,
     NOTIFICATIONS,
     ACCESS_REQUESTS,
     ACCESS_GRANTS,
@@ -44,6 +45,9 @@ async def create_indexes():
     await db[PRESCRIPTIONS].create_index("prescription_date")
     await db[PRESCRIPTIONS].create_index("created_at")
     await db[PRESCRIPTIONS].create_index("verification_token", unique=True, sparse=True)
+
+    await db[PAPER_UPLOADS].create_index("patient_id")
+    await db[PAPER_UPLOADS].create_index("created_at")
 
     await db[NOTIFICATIONS].create_index("user_id")
     await db[NOTIFICATIONS].create_index("is_read")

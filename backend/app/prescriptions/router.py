@@ -1,11 +1,23 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Query, UploadFile, File, Form
 from fastapi.responses import FileResponse
+from datetime import date
 from typing import List, Optional
 from app.auth.dependencies import get_current_user, get_current_verified_doctor, get_current_patient
-from app.schemas.prescription import PrescriptionCreate, PrescriptionUpdate, PrescriptionResponse
+from app.schemas.prescription import (
+    PaperPrescriptionConfirm,
+    PaperPrescriptionScanResponse,
+    PrescriptionCreate,
+    PrescriptionResponse,
+    PrescriptionUpdate,
+)
 from app.models.user import User
 from app.prescriptions.services.prescription_service import PrescriptionService, PrescriptionServiceError
+from app.prescriptions.services.paper_prescription_service import (
+    PaperPrescriptionError,
+    PaperPrescriptionService,
+)
 from app.prescriptions.services.pdf_service import PrescriptionPDFError
+from app.reports.services.file_validation import FileValidationError
 from app.access import grants as grant_checks
 from app.audit.service import log_access, client_info
 from app.database.repositories.patient_repository import PatientRepository
@@ -85,6 +97,111 @@ async def list_patient_prescriptions(
     return prescriptions
 
 
+@router.post("/paper", response_model=PrescriptionResponse, status_code=status.HTTP_201_CREATED)
+async def create_paper_prescription(
+    request: Request,
+    file: UploadFile = File(...),
+    prescriber_name: Optional[str] = Form(None),
+    prescription_date: Optional[date] = Form(None),
+    note: Optional[str] = Form(None),
+    current_user: User = Depends(get_current_patient),
+):
+    """Store a patient's paper prescription file as an unverified record.
+
+    This endpoint intentionally does not run OCR or create medicine rows.
+    """
+    service = PaperPrescriptionService()
+    try:
+        record = await service.create(
+            current_user.id,
+            file,
+            prescriber_name=prescriber_name,
+            prescription_date=prescription_date,
+            note=note,
+        )
+        ip, ua = client_info(request)
+        await log_access(current_user.id, current_user.role, "create", "prescription",
+                         record.id, record.patient_id, ip, ua)
+        return record
+    except PaperPrescriptionError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to save paper prescription")
+
+
+@router.get("/paper/{prescription_id}/file")
+async def get_paper_prescription_file(
+    prescription_id: str,
+    current_user: User = Depends(get_current_patient),
+):
+    """Serve the original paper file to its owner only."""
+    service = PaperPrescriptionService()
+    file_info = await service.get_file(prescription_id, current_user.id)
+    if not file_info:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper prescription file not found")
+    return FileResponse(
+        file_info["path"],
+        media_type=file_info["media_type"],
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
+@router.post("/paper/scan", response_model=PaperPrescriptionScanResponse)
+async def scan_paper_prescription(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_patient),
+):
+    """Patient digitizes a paper prescription into DRAFT rows.
+
+    Reuses the existing scan pipeline and stores only a temporary upload copy.
+    Nothing is added to the medical history until the patient confirms.
+    """
+    service = PaperPrescriptionService()
+    try:
+        return await service.scan(file, current_user.id)
+    except (FileValidationError, ValueError) as exc:
+        detail = exc.detail if isinstance(exc, FileValidationError) else str(exc)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Scan failed")
+
+
+@router.post("/paper/confirm", response_model=PrescriptionResponse, status_code=status.HTTP_201_CREATED)
+async def confirm_paper_prescription(
+    payload: PaperPrescriptionConfirm,
+    request: Request,
+    current_user: User = Depends(get_current_patient),
+):
+    """Save the patient-reviewed paper rows as an unverified paper record."""
+    service = PaperPrescriptionService()
+    try:
+        record = await service.confirm(current_user.id, payload)
+        ip, ua = client_info(request)
+        await log_access(current_user.id, current_user.role, "create", "prescription",
+                         record.id, record.patient_id, ip, ua)
+        return record
+    except PaperPrescriptionError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to save paper prescription")
+
+
+@router.delete("/paper/{prescription_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_paper_prescription(
+    prescription_id: str,
+    current_user: User = Depends(get_current_patient),
+):
+    service = PaperPrescriptionService()
+    deleted = await service.delete(prescription_id, current_user.id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper prescription not found")
+    return None
+
+
 @router.get("/{prescription_id}", response_model=PrescriptionResponse)
 async def get_prescription(prescription_id: str, request: Request, current_user: User = Depends(get_current_user)):
     if current_user.role == "doctor":
@@ -99,6 +216,16 @@ async def get_prescription(prescription_id: str, request: Request, current_user:
             )
     service = PrescriptionService()
     prescription = await service.get_prescription(prescription_id, current_user.id, current_user.role)
+    if not prescription and current_user.role == "doctor":
+        # Paper prescriptions have no issuing doctor. A verified doctor may
+        # read them only with an active patient grant; the response carries
+        # source/verified so the UI can show the "not verified" badge.
+        candidate = await service.repo.get_by_id(prescription_id)
+        if candidate and getattr(candidate, "source", None) == "patient_uploaded":
+            await grant_checks.require_active_grant(
+                candidate.patient_id, current_user.id, "prescriptions"
+            )
+            prescription = candidate
     if not prescription:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prescription not found")
     ip, ua = client_info(request)

@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 from app.models.prescription import Prescription, PrescriptionItem
 
 
@@ -13,6 +13,45 @@ class PrescriptionItemCreate(BaseModel):
     instructions: Optional[str] = Field(None, max_length=500)
     quantity: Optional[str] = Field(None, max_length=50)
     timings: Optional[str] = Field(None, max_length=200)
+
+
+class PaperPrescriptionConfirm(BaseModel):
+    """Patient-reviewed rows for a paper prescription.
+
+    ``confirmed_by_patient`` must be true: the patient is asserting they
+    checked the digitized details against the physical paper.
+    """
+
+    temp_upload_id: str = Field(..., min_length=1, max_length=100)
+    prescriber_name: Optional[str] = Field(None, max_length=200)
+    prescription_date: Optional[datetime] = None
+    note: Optional[str] = Field(None, max_length=2000)
+    items: list[PrescriptionItemCreate] = Field(..., min_length=1)
+    confirmed_by_patient: bool = False
+
+
+class PaperPrescriptionScanItem(BaseModel):
+    medicine_name: str = ""
+    dosage: str = ""
+    frequency: str = ""
+    duration: str = ""
+    instructions: str = ""
+    route: Optional[str] = None
+    confidence: float = 0.0
+    needs_review: bool = True
+
+
+class PaperPrescriptionScanResponse(BaseModel):
+    temp_upload_id: str
+    original_filename: Optional[str] = None
+    ocr_used: bool = False
+    raw_text: str = ""
+    items: list[PaperPrescriptionScanItem] = Field(default_factory=list)
+    detected_doctor_name: Optional[str] = None
+    detected_prescription_date: Optional[str] = None
+    extraction_method: Optional[str] = None
+    note: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class PrescriptionCreate(BaseModel):
@@ -46,9 +85,14 @@ class PrescriptionResponse(BaseModel):
     diagnosis_notes: Optional[str] = None
     advice: Optional[str] = None
     follow_up_date: Optional[datetime] = None
-    items: list[PrescriptionItem]
+    items: list[PrescriptionItem] = Field(default_factory=list)
     status: str
     file_path: Optional[str] = None
+    source: str = "doctor_issued"
+    verified: bool = True
+    confirmed_by_patient: bool = False
+    prescriber_name: Optional[str] = None
+    original_file_name: Optional[str] = None
     safety_warnings: list[dict] = []
     acknowledged_warnings: bool = False
     verification_token: Optional[str] = None

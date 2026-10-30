@@ -68,6 +68,49 @@ export async function scanPrescription(file) {
   return response.data
 }
 
+export async function createPaperPrescription({
+  file,
+  doctorName,
+  prescriptionDate,
+  note,
+}) {
+  const formData = new FormData()
+  formData.append('file', file)
+  if (doctorName) formData.append('prescriber_name', doctorName)
+  if (prescriptionDate) formData.append('prescription_date', prescriptionDate)
+  if (note) formData.append('note', note)
+  const response = await api.post('/prescriptions/paper', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return response.data
+}
+
+export async function getPaperPrescriptionFile(prescriptionId) {
+  const response = await api.get(`/prescriptions/paper/${prescriptionId}/file`, {
+    responseType: 'blob',
+  })
+  return response.data
+}
+
+export async function scanPaperPrescription(file) {
+  const formData = new FormData()
+  formData.append('file', file)
+  const response = await api.post('/prescriptions/paper/scan', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return response.data
+}
+
+export async function confirmPaperPrescription(payload) {
+  const response = await api.post('/prescriptions/paper/confirm', payload)
+  return response.data
+}
+
+export async function deletePaperPrescription(prescriptionId) {
+  const response = await api.delete(`/prescriptions/paper/${prescriptionId}`)
+  return response.data
+}
+
 export async function verifyPrescriptionToken(token) {
   const response = await api.get(`/verify/prescription/${token}`)
   return response.data

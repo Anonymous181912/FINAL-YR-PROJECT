@@ -6,7 +6,9 @@ export function FileDropzone({
   onFileSelect,
   accept = '.pdf,.png,.jpg,.jpeg,.txt',
   maxSizeMB = 10,
+  description,
   className,
+  disabled = false,
 }) {
   const [dragActive, setDragActive] = React.useState(false)
   const [error, setError] = React.useState('')
@@ -16,6 +18,7 @@ export function FileDropzone({
   const handleDrag = (e) => {
     e.preventDefault()
     e.stopPropagation()
+    if (disabled) return
     if (e.type === 'dragenter' || e.type === 'dragover') {
       setDragActive(true)
     } else if (e.type === 'dragleave') {
@@ -24,6 +27,7 @@ export function FileDropzone({
   }
 
   const validateAndSelect = (file) => {
+    if (disabled) return
     setError('')
     if (!file) return
 
@@ -40,6 +44,7 @@ export function FileDropzone({
     e.preventDefault()
     e.stopPropagation()
     setDragActive(false)
+    if (disabled) return
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       validateAndSelect(e.dataTransfer.files[0])
     }
@@ -58,9 +63,12 @@ export function FileDropzone({
         onDragLeave={handleDrag}
         onDragOver={handleDrag}
         onDrop={handleDrop}
-        onClick={() => inputRef.current?.click()}
+        onClick={() => {
+          if (!disabled) inputRef.current?.click()
+        }}
         className={cn(
-          'relative flex flex-col items-center justify-center p-6 border-2 border-dashed rounded-card transition-all cursor-pointer text-center',
+          'relative flex flex-col items-center justify-center p-6 border-2 border-dashed rounded-card transition-all text-center',
+          disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
           dragActive
             ? 'border-accent bg-accent-soft/30 scale-[1.01]'
             : 'border-border bg-surface-2/40 hover:bg-surface-2/70 hover:border-foreground-subtle/50',
@@ -73,6 +81,7 @@ export function FileDropzone({
           accept={accept}
           onChange={handleChange}
           className="hidden"
+          disabled={disabled}
         />
 
         {selectedFile ? (
@@ -94,7 +103,7 @@ export function FileDropzone({
               Drop your report file here, or <span className="text-accent underline">browse</span>
             </div>
             <div className="text-xs text-foreground-subtle">
-              Accepts PDF, PNG, JPG, TXT (up to {maxSizeMB}MB)
+              {description || `Accepts PDF, PNG, JPG, TXT (up to ${maxSizeMB}MB)`}
             </div>
           </div>
         )}
